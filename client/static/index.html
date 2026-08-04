@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="theme-color" content="#241f1c">
+<title>Kingsreach</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --gold: #d9a83a;
+    --gold-pale: #f3d27a;
+    --teal: #7fd4c9;
+    --cream: #e8ddc8;
+    --card: rgba(42, 38, 36, .96);
+    --bar: rgba(26, 22, 20, .88);
+    --line: #57504a;
+    --btn: #3a342f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    font-family: Georgia, 'Times New Roman', serif;
+    color: var(--cream);
+    background: #14110f;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+
+  .overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(12,10,9,.72); z-index: 20; padding: 16px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: 0 24px 70px rgba(0,0,0,.6); padding: 30px 34px; width: min(520px, 94vw);
+    text-align: center; max-height: 92vh; overflow-y: auto;
+  }
+  h1 { margin: 0 0 4px; font-size: clamp(30px, 6vw, 46px); letter-spacing: 6px; color: var(--gold-pale); text-transform: uppercase; }
+  .tagline { color: var(--teal); font-style: italic; margin-bottom: 14px; font-size: 17px; }
+  .stats { color: #a99e8c; font-size: 14px; margin-bottom: 20px; }
+
+  button {
+    font-family: inherit; font-size: 17px; padding: 12px 20px; border-radius: 10px;
+    border: 1px solid #6b6258; background: var(--btn); color: var(--cream); cursor: pointer;
+    transition: filter .12s ease, transform .08s ease;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.18); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--gold); border-color: #b3872a; color: #241f1c; font-weight: bold; }
+  button.wide { display: block; width: 100%; margin-bottom: 10px; }
+  button.ghost { background: transparent; border-color: var(--line); color: var(--teal); }
+  /* Valve's own sign-in button, served from our origin. Shown at its native
+     180×35 — the "not associated with Valve Corp." line is part of the image
+     and must stay legible, so it is never scaled up or recoloured. */
+  button.steam {
+    display: block; margin: 10px auto 8px; padding: 3px; line-height: 0;
+    background: none; border: none; border-radius: 5px;
+  }
+  button.steam img { display: block; }
+  button.steam:disabled { filter: grayscale(1); }
+  button.steam:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+  .row { display: flex; gap: 10px; margin-bottom: 10px; }
+  .row > * { flex: 1; }
+  input, select {
+    font-family: inherit; font-size: 17px; text-align: left;
+    padding: 11px 12px; border-radius: 10px; border: 1px solid #6b6258; background: #191614; color: var(--gold-pale);
+    width: 100%; min-width: 0;
+  }
+  input::placeholder { color: #6b6258; }
+  select { cursor: pointer; }
+
+  /* Country flags, drawn in CSS — see flags.ts */
+  .flag {
+    display: inline-block; width: 21px; height: 14px; border-radius: 2px; flex: none;
+    border: 1px solid rgba(0,0,0,.55); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+    background-size: cover; vertical-align: -2px;
+  }
+  .flag.plain {
+    background: #3a342f; font-size: 9px; line-height: 13px; text-align: center;
+    letter-spacing: 0; color: #a99e8c; font-family: system-ui, sans-serif;
+  }
+
+  .or { color: #7d7469; font-size: 13px; letter-spacing: 3px; margin: 16px 0 12px; text-transform: uppercase; }
+  .hint { color: #a99e8c; font-size: 13px; font-style: italic; margin: -4px 0 14px; }
+
+  /* Who you are, on the menu */
+  .me { display: flex; align-items: center; justify-content: center; gap: 9px; margin-bottom: 6px; }
+  .me img { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); object-fit: cover; }
+  .me .nick { font-size: 19px; color: var(--gold-pale); }
+  #btn-switch { background: none; border: none; color: #8d8377; font-size: 12px; padding: 2px 6px; text-decoration: underline; }
+
+  #topbar, #bottombar {
+    position: fixed; left: 0; right: 0; z-index: 10; background: var(--bar);
+    display: flex; align-items: center; gap: 10px; padding: 9px 14px;
+    backdrop-filter: blur(6px); border-color: var(--line); border-style: solid; border-width: 0;
+  }
+  #topbar { top: 0; border-bottom-width: 1px; justify-content: center; font-size: 17px; min-height: 44px; }
+  #bottombar { bottom: 0; border-top-width: 1px; flex-wrap: wrap; }
+  #bottombar button { padding: 7px 14px; font-size: 15px; }
+  #seat { color: var(--teal); font-size: 14px; }
+  #gamecode { color: var(--gold-pale); font-size: 14px; letter-spacing: 2px; }
+  .spacer { flex: 1; }
+  .hud-hidden #topbar, .hud-hidden #bottombar { display: none; }
+
+  .muted { color: #a99e8c; font-size: 14px; }
+  #lobbyseats { margin: 4px 0 14px; }
+  #lobbyseats .seatline {
+    display: flex; align-items: center; gap: 9px; text-align: left; font-size: 14px;
+    border-left: 4px solid #555; border-radius: 4px; padding: 5px 8px; margin-bottom: 5px;
+    background: rgba(16,14,13,.7);
+  }
+  #lobbyseats .seatline .who { flex: 1; }
+  #lobbyseats .seatline.open .who { color: #8d8377; font-style: italic; }
+
+  /* Player-count picker */
+  .seg { display: flex; gap: 6px; margin-bottom: 12px; }
+  .seg button { flex: 1; padding: 9px 6px; font-size: 15px; }
+  .seg button.on { background: var(--gold); border-color: #b3872a; color: #241f1c; font-weight: bold; }
+
+  /* Seat list — who is at the table, who is to move, who is out */
+  #players {
+    position: fixed; top: 52px; left: 10px; z-index: 10;
+    display: flex; flex-direction: column; gap: 5px; pointer-events: none;
+  }
+  .hud-hidden #players { display: none; }
+  .player {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bar); border: 1px solid var(--line); border-left-width: 4px;
+    border-radius: 8px; padding: 5px 10px 5px 8px; font-size: 14px;
+    backdrop-filter: blur(6px); min-width: 150px;
+  }
+  .player .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; border: 1px solid rgba(0,0,0,.45); }
+  .player .who { flex: 1; white-space: nowrap; }
+  .player .tag { font-size: 11px; color: #a99e8c; letter-spacing: 1px; text-transform: uppercase; }
+  .player.turn { border-color: var(--gold); box-shadow: 0 0 0 1px rgba(217,168,58,.35); }
+  .player.turn .tag { color: var(--gold-pale); }
+  .player.gone { opacity: .45; }
+  .player.gone .who { text-decoration: line-through; }
+  .player.mine .who { color: var(--gold-pale); }
+  .player .lost { font-size: 12px; color: #a99e8c; letter-spacing: 1px; }
+
+  /* ---- Lobby browser ---- */
+  .card.wide { width: min(880px, 97vw); }
+
+  .searchbar {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+    background: #191614; border: 1px solid #4a443e; border-radius: 12px; padding: 4px 12px;
+  }
+  .searchbar .magnifier { color: #6b6258; font-size: 19px; flex: none; }
+  .searchbar input {
+    flex: 1; border: none; background: none; padding: 9px 0; font-size: 16px;
+    color: var(--cream); border-radius: 0;
+  }
+  .searchbar input:focus { outline: none; }
+  .searchbar .count { color: #8d8377; font-size: 13px; white-space: nowrap; flex: none; }
+  button.icon {
+    flex: none; padding: 5px 10px; font-size: 17px; line-height: 1.2;
+    background: var(--btn); border-color: #4a443e;
+  }
+  button.icon.spin { animation: spin .6s linear; }
+  @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+
+  .seg.filters { margin-bottom: 10px; }
+  .seg.filters button { font-size: 14px; padding: 7px 6px; }
+
+  .tablewrap {
+    border: 1px solid #3c3733; border-radius: 12px; overflow: auto;
+    max-height: min(52vh, 430px); background: rgba(16,14,13,.55);
+  }
+  table.lobbies { width: 100%; border-collapse: collapse; text-align: left; }
+  table.lobbies th {
+    position: sticky; top: 0; z-index: 1;
+    background: #221e1b; color: #a99e8c; font-weight: normal;
+    font-size: 12px; letter-spacing: 2px; padding: 11px 12px;
+    border-bottom: 1px solid #3c3733; white-space: nowrap; user-select: none;
+  }
+  table.lobbies th.sortable { cursor: pointer; }
+  table.lobbies th.sortable:hover { color: var(--gold-pale); }
+  table.lobbies th.on { color: var(--gold); }
+  table.lobbies th .arrow { font-size: 10px; opacity: .75; }
+  table.lobbies th.num, table.lobbies td.num { text-align: center; }
+  table.lobbies th.act { width: 1%; }
+  table.lobbies td { padding: 9px 12px; border-bottom: 1px solid #2c2825; vertical-align: middle; }
+  table.lobbies tr:last-child td { border-bottom: none; }
+  table.lobbies tbody tr:hover { background: rgba(217,168,58,.06); }
+  table.lobbies tr.mine td { background: rgba(217,168,58,.10); }
+  table.lobbies tr.running td { color: #8d8377; }
+
+  .tname { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .tname .name {
+    font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 34ch;
+  }
+  tr.running .tname .name { color: #a99e8c; }
+  .tname .host { color: var(--teal); font-size: 12px; font-style: italic; }
+  tr.running .tname .host { color: #7d7469; }
+  .lock { font-size: 12px; color: var(--gold-pale); flex: none; }
+  .seats { font-size: 14px; color: var(--cream); white-space: nowrap; }
+  .seats.full { color: #8d8377; }
+  .when { font-size: 13px; color: #a99e8c; white-space: nowrap; }
+  table.lobbies td button { padding: 6px 16px; font-size: 14px; white-space: nowrap; }
+  .live { color: #6fbf8f; font-size: 13px; white-space: nowrap; }
+  .empty { color: #8d8377; font-style: italic; font-size: 14px; padding: 22px 12px; text-align: center; }
+
+  .section { text-align: left; color: var(--gold); letter-spacing: 3px; font-size: 14px; margin: 18px 0 8px; }
+  .item {
+    display: flex; align-items: center; gap: 12px; text-align: left;
+    background: rgba(16,14,13,.8); border: 1px solid #3c3733; border-radius: 10px;
+    padding: 9px 11px; margin-bottom: 7px;
+  }
+  .item.locked { opacity: .58; }
+  .item .info { flex: 1; min-width: 0; }
+  .item .name { font-size: 16px; }
+  .item .desc { font-size: 12px; color: var(--teal); font-style: italic; margin-top: 2px; }
+  .item.locked .desc { color: #97836f; }
+  .item button { padding: 7px 14px; font-size: 14px; white-space: nowrap; }
+  .swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(0,0,0,.5); flex: none; }
+
+  /* Music toggle — always reachable, on every screen */
+  #music {
+    position: fixed; top: 10px; right: 12px; z-index: 25;
+    display: flex; align-items: center; gap: 8px; pointer-events: none;
+  }
+  #btn-music {
+    pointer-events: auto; padding: 6px 10px; font-size: 15px; line-height: 1;
+    background: var(--bar); border-color: var(--line); backdrop-filter: blur(6px);
+    min-width: 38px;
+  }
+  #nowplaying {
+    font-size: 12px; color: #a99e8c; font-style: italic; max-width: 46vw;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: opacity .5s ease;
+  }
+  #nowplaying.faded { opacity: 0; }
+  .credit { color: #7d7469; font-size: 11px; font-style: italic; margin-top: 14px; line-height: 1.5; }
+  .credit a { color: #8d8377; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%) translateY(14px);
+    background: #4a2a24; border: 1px solid #a05242; color: #f3d9c8; padding: 11px 22px; border-radius: 10px;
+    z-index: 30; max-width: 88vw; text-align: center; opacity: 0; pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease; font-size: 15px;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.good { background: #23402f; border-color: #4e8a63; color: #d8f0e0; }
+
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #14110f; z-index: 40; transition: opacity .4s ease; }
+  #loading.done { opacity: 0; pointer-events: none; }
+  #loading .tagline { margin-top: 8px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <canvas id="scene" touch-action="none"></canvas>
+
+  <div id="topbar"><span id="status">…</span></div>
+
+  <div id="players"></div>
+
+  <div id="bottombar">
+    <span id="seat"></span>
+    <span id="gamecode"></span>
+    <span class="spacer"></span>
+    <button id="btn-throw" class="primary hidden" title="Throw the die">Throw the die</button>
+    <button id="btn-focus" title="Look from your side of the table again">Focus</button>
+    <button id="btn-resign">Resign</button>
+    <button id="btn-leave">Leave</button>
+  </div>
+
+  <div id="signin" class="overlay hidden">
+    <div class="card">
+      <h1>Kingsreach</h1>
+      <div class="tagline">March your king to the Gilded Throne.</div>
+      <button class="steam" id="btn-steam" title="Sign in through Steam">
+        <img src="images/steam-signin.png" width="180" height="35" alt="Sign in through Steam">
+      </button>
+      <div class="hint" id="steam-hint">Keeps your battles, victories and everything you unlock.</div>
+      <div class="or">or play as a guest</div>
+      <div class="row">
+        <input id="guest-name" maxlength="24" placeholder="Your name" autocomplete="nickname" spellcheck="false">
+        <select id="guest-country" aria-label="Country"></select>
+      </div>
+      <button class="wide" id="btn-guest">Enter the hall</button>
+      <div class="hint">A guest keeps no progress — skins and places stay locked.</div>
+    </div>
+  </div>
+
+  <div id="menu" class="overlay hidden">
+    <div class="card">
+      <h1>Kingsreach</h1>
+      <div class="me" id="me"></div>
+      <div class="stats" id="menu-stats"></div>
+      <button class="primary wide" id="btn-browse">Find a table</button>
+      <button class="primary wide" id="btn-create">Open your own table</button>
+      <button class="ghost wide" id="btn-practice">Practice board</button>
+      <button class="ghost wide" id="btn-collection">Collection — skins &amp; places</button>
+      <button class="ghost wide hidden" id="btn-resume">Resume last game</button>
+      <button id="btn-switch">Not you? Sign in as someone else</button>
+    </div>
+  </div>
+
+  <div id="browser" class="overlay hidden">
+    <div class="card wide">
+      <h1 style="font-size:28px;margin-bottom:14px">The board room</h1>
+
+      <div class="searchbar">
+        <span class="magnifier" aria-hidden="true">⌕</span>
+        <input id="lobby-search" placeholder="Search by table, host or country…" autocomplete="off" spellcheck="false">
+        <span class="count" id="lobby-count">—</span>
+        <button id="btn-refresh" class="icon" title="Refresh the list" aria-label="Refresh the list">⟳</button>
+      </div>
+
+      <div class="seg filters" id="lobby-filter" role="group" aria-label="Which tables">
+        <button data-filter="all" class="on">Everything</button>
+        <button data-filter="open">Open tables</button>
+        <button data-filter="running">In progress</button>
+      </div>
+
+      <div class="tablewrap">
+        <table class="lobbies">
+          <thead>
+            <tr>
+              <th class="sortable" data-sort="name">TABLE <span class="arrow"></span></th>
+              <th class="sortable num" data-sort="players">PLAYERS <span class="arrow"></span></th>
+              <th class="sortable" data-sort="age">STATUS <span class="arrow"></span></th>
+              <th class="act"></th>
+            </tr>
+          </thead>
+          <tbody id="lobby-rows"></tbody>
+        </table>
+      </div>
+
+      <div class="row" style="margin-top:14px">
+        <button class="primary" id="btn-create-2">Open your own table</button>
+        <button class="ghost" id="btn-close-browser">Back</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="create" class="overlay hidden">
+    <div class="card">
+      <h1 style="font-size:28px">Open a table</h1>
+      <div class="row">
+        <input id="table-name" maxlength="40" placeholder="Table name" autocomplete="off">
+      </div>
+      <div class="seg" id="player-count" role="group" aria-label="Players">
+        <button data-players="2" class="on">2 players</button>
+        <button data-players="3">3</button>
+        <button data-players="4">4</button>
+      </div>
+      <div class="row">
+        <input id="table-pass" type="password" maxlength="40" placeholder="Password (leave empty for an open table)" autocomplete="new-password">
+      </div>
+      <button class="primary wide" id="btn-open-table">Open the table</button>
+      <button class="ghost wide" id="btn-cancel-create">Back</button>
+    </div>
+  </div>
+
+  <div id="joinpass" class="overlay hidden">
+    <div class="card">
+      <h1 style="font-size:26px">Locked table</h1>
+      <div class="tagline" id="joinpass-name"></div>
+      <div class="row">
+        <input id="joinpass-input" type="password" maxlength="40" placeholder="Password" autocomplete="off">
+      </div>
+      <button class="primary wide" id="btn-joinpass">Join</button>
+      <button class="ghost wide" id="btn-joinpass-cancel">Back</button>
+    </div>
+  </div>
+
+  <div id="lobby" class="overlay hidden">
+    <div class="card">
+      <div class="muted">Your table is open</div>
+      <h1 style="font-size:30px" id="lobbyname">Table</h1>
+      <div class="tagline" id="lobbywait">Awaiting a challenger…</div>
+      <div id="lobbyseats"></div>
+      <button class="primary wide" id="btn-start">Start now — the computer takes the empty seats</button>
+      <button class="ghost wide" id="btn-cancel">Cancel</button>
+    </div>
+  </div>
+
+  <div id="collection" class="overlay hidden">
+    <div class="card">
+      <h1 style="font-size:30px">Collection</h1>
+      <div class="stats" id="collection-stats"></div>
+      <div id="collection-list"></div>
+      <div class="section">MUSIC</div>
+      <div class="credit" id="music-credits"></div>
+      <button class="primary wide" id="btn-close-collection" style="margin-top:16px">Close</button>
+    </div>
+  </div>
+
+  <div id="result" class="overlay hidden">
+    <div class="card">
+      <h1 id="result-title" style="font-size:32px"></h1>
+      <div class="tagline" id="result-reason"></div>
+      <button class="primary wide" id="btn-back">Back to the great hall</button>
+    </div>
+  </div>
+
+  <div id="music">
+    <span id="nowplaying" class="faded"></span>
+    <button id="btn-music" title="Music on or off" aria-label="Music on or off">♪</button>
+  </div>
+
+  <div id="toast"></div>
+
+  <div id="loading">
+    <div style="text-align:center">
+      <h1>Kingsreach</h1>
+      <div class="tagline" id="loading-text">Unrolling the cloth…</div>
+    </div>
+  </div>
+
+  <script src="kingsreach.js"></script>
+</body>
+</html>

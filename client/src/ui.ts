@@ -1,0 +1,782 @@
+import type { CatalogItem, GameState, Lobby, Profile, RunningTable } from "./api";
+import { countryList, countryName, flagChip } from "./flags";
+import type { Track } from "./music";
+import { seatInfo, seatName } from "./seats";
+
+// Thin wrapper around the HTML overlay in index.html. The 3D scene owns the
+// canvas; everything with text lives in the DOM (crisp, accessible, cheap).
+
+const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
+
+// Preview colors per skin, mirroring skins.ts (west swatch / east swatch).
+const SKIN_SWATCH: Record<string, [string, string]> = {
+  clay: ["#34302C", "#C9884F"],
+  royal: ["#C9A227", "#C4C9CE"],
+  crystal: ["#5FE3D6", "#F080BE"],
+  rune: ["#4A4A48", "#5C6250"],
+};
+const ENV_SWATCH: Record<string, [string, string]> = {
+  picnic: ["#5E8C4A", "#b82c37"],
+  fair: ["#A63A3A", "#FFB870"],
+  dust2: ["#C9A96A", "#7E6438"],
+  store: ["#8A6542", "#FFD9A0"],
+  cafe: ["#2E2A26", "#C8BFAE"],
+};
+
+export interface TableOptions {
+  name: string;
+  players: number;
+  password: string;
+}
+
+export interface UiHandlers {
+  steamLogin(): void;
+  guest(name: string, country: string): void;
+  switchPlayer(): void;
+  browse(): void;
+  refresh(): void;
+  joinTable(gameId: string, password: string): void;
+  createTable(opts: TableOptions): void;
+  practice(players: number): void;
+  startEarly(): void;
+  resume(): void;
+  leave(): void;
+  resign(): void;
+  focus(): void;
+  throwDie(): void;
+  toggleMusic(): void;
+  equip(id: string, kind: "skin" | "env"): void;
+}
+
+/** Why a seat dropped out, for the seat list. */
+const OUT_CAUSE: Record<string, string> = {
+  "king-captured": "king taken",
+  "no-legal-move": "walled in",
+  resigned: "resigned",
+};
+
+export class Ui {
+  private toastTimer = 0;
+  private nowPlayingTimer = 0;
+  private resignArmed = 0;
+  private profile: Profile | null = null;
+  private catalog: CatalogItem[] = [];
+
+  private players = 2;
+  /** The locked table the password prompt is for. */
+  private pendingJoin = "";
+
+  // Latest lists from the server, plus how the player wants them shown.
+  private lobbies: Lobby[] = [];
+  private running: RunningTable[] = [];
+  // "all" by default: landing on the full room is the point of a browser, and
+  // the open tables sort to the top anyway.
+  private filter: "open" | "running" | "all" = "all";
+  private sortKey: "name" | "players" | "age" = "players";
+  private sortDesc = false;
+
+  constructor(private readonly h: UiHandlers) {
+    for (const btn of Array.from($("player-count").querySelectorAll("button"))) {
+      btn.onclick = () => {
+        this.players = Number(btn.dataset.players ?? 2);
+        for (const other of Array.from($("player-count").querySelectorAll("button"))) {
+          other.classList.toggle("on", other === btn);
+        }
+      };
+    }
+    this.fillCountries();
+
+    $("btn-steam").onclick = () => h.steamLogin();
+    $("btn-guest").onclick = () => this.submitGuest();
+    $("btn-switch").onclick = () => h.switchPlayer();
+    $("btn-browse").onclick = () => h.browse();
+    $("btn-close-browser").onclick = () => this.showMenu(this.canResume);
+    this.wireBrowser();
+    $("btn-create").onclick = () => this.showCreate();
+    $("btn-create-2").onclick = () => this.showCreate();
+    $("btn-cancel-create").onclick = () => this.showMenu(this.canResume);
+    $("btn-open-table").onclick = () => this.submitTable();
+    $("btn-joinpass").onclick = () => this.submitPassword();
+    $("btn-joinpass-cancel").onclick = () => {
+      this.pendingJoin = "";
+      $("joinpass").classList.add("hidden");
+    };
+    $("btn-practice").onclick = () => h.practice(2);
+    $("btn-start").onclick = () => h.startEarly();
+    $("btn-resume").onclick = () => h.resume();
+    $("btn-cancel").onclick = () => h.leave();
+    $("btn-leave").onclick = () => h.leave();
+    $("btn-back").onclick = () => h.leave();
+    $("btn-focus").onclick = () => h.focus();
+    $("btn-throw").onclick = () => h.throwDie();
+    $("btn-resign").onclick = () => this.onResign();
+    $("btn-music").onclick = () => h.toggleMusic();
+    $("btn-collection").onclick = () => this.showCollection();
+    $("btn-close-collection").onclick = () => $("collection").classList.add("hidden");
+
+    onEnter($<HTMLInputElement>("guest-name"), () => this.submitGuest());
+    onEnter($<HTMLInputElement>("table-name"), () => this.submitTable());
+    onEnter($<HTMLInputElement>("table-pass"), () => this.submitTable());
+    onEnter($<HTMLInputElement>("joinpass-input"), () => this.submitPassword());
+  }
+
+  private canResume = false;
+
+  /** Search box, filter buttons, sortable headers and the refresh button. */
+  private wireBrowser(): void {
+    const search = $<HTMLInputElement>("lobby-search");
+    // Redraw from the lists we already hold: filtering must feel instant and
+    // must not wait on (or fire) a request.
+    search.addEventListener("input", () => this.drawLobbies());
+    search.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        search.value = "";
+        this.drawLobbies();
+      }
+    });
+
+    for (const btn of Array.from($("lobby-filter").querySelectorAll("button"))) {
+      btn.onclick = () => {
+        this.filter = (btn.dataset.filter as typeof this.filter) ?? "open";
+        for (const other of Array.from($("lobby-filter").querySelectorAll("button"))) {
+          other.classList.toggle("on", other === btn);
+        }
+        this.drawLobbies();
+      };
+    }
+
+    for (const th of Array.from(document.querySelectorAll<HTMLElement>("th.sortable"))) {
+      th.onclick = () => {
+        const key = (th.dataset.sort as typeof this.sortKey) ?? "name";
+        if (this.sortKey === key) this.sortDesc = !this.sortDesc;
+        else {
+          this.sortKey = key;
+          this.sortDesc = false;
+        }
+        this.drawLobbies();
+      };
+    }
+
+    const refresh = $("btn-refresh");
+    refresh.onclick = () => {
+      refresh.classList.remove("spin");
+      void refresh.offsetWidth; // restart the animation on a repeat click
+      refresh.classList.add("spin");
+      this.h.refresh();
+    };
+  }
+
+  private fillCountries(): void {
+    const select = $<HTMLSelectElement>("guest-country");
+    const none = new Option("Country…", "");
+    select.add(none);
+    for (const c of countryList()) select.add(new Option(c.name, c.code));
+  }
+
+  /**
+   * Preselects the country guessed from the player's address. Only ever a
+   * default: it is shown in the open picker, so nobody gets a flag they did
+   * not see. A code we have no flag for is left alone.
+   */
+  suggestCountry(code: string): void {
+    const select = $<HTMLSelectElement>("guest-country");
+    if (select.value) return; // the player already chose
+    const wanted = code.toUpperCase();
+    if ([...select.options].some((o) => o.value === wanted)) select.value = wanted;
+  }
+
+  private submitGuest(): void {
+    const name = $<HTMLInputElement>("guest-name").value.trim();
+    if (!name) {
+      this.toast("Give the herald a name to announce.");
+      return;
+    }
+    this.h.guest(name, $<HTMLSelectElement>("guest-country").value);
+  }
+
+  private submitTable(): void {
+    this.h.createTable({
+      name: $<HTMLInputElement>("table-name").value.trim(),
+      players: this.players,
+      password: $<HTMLInputElement>("table-pass").value,
+    });
+  }
+
+  private submitPassword(): void {
+    if (!this.pendingJoin) return;
+    this.h.joinTable(this.pendingJoin, $<HTMLInputElement>("joinpass-input").value);
+  }
+
+  ready(): void {
+    $("loading").classList.add("done");
+    setTimeout(() => $("loading").classList.add("hidden"), 450);
+  }
+
+  loadingText(msg: string): void {
+    $("loading-text").textContent = msg;
+  }
+
+  setData(profile: Profile | null, catalog: CatalogItem[]): void {
+    this.profile = profile;
+    this.catalog = catalog;
+    this.refreshStats();
+    this.renderMe();
+    if (!$("collection").classList.contains("hidden")) this.renderCollection();
+  }
+
+  /**
+   * Reflects the music state: the button, and a "now playing" line that shows
+   * itself for a few seconds when the track changes and then fades out again.
+   */
+  setMusic(muted: boolean, track: Track | null, playlist: readonly Track[]): void {
+    const btn = $("btn-music");
+    btn.textContent = muted ? "♪̷" : "♪";
+    btn.title = muted ? "Music off — click to play" : "Music on — click to mute";
+    btn.classList.toggle("ghost", muted);
+
+    const line = $("nowplaying");
+    const label = track ? `${track.title} — ${track.artist}` : "";
+    if (muted || !label) {
+      line.classList.add("faded");
+    } else if (line.textContent !== label) {
+      line.textContent = label;
+      line.classList.remove("faded");
+      clearTimeout(this.nowPlayingTimer);
+      this.nowPlayingTimer = window.setTimeout(() => line.classList.add("faded"), 6000);
+    }
+
+    // Attribution is a licence condition for these tracks, so it is rendered
+    // from the track data and cannot drift out of sync with the playlist.
+    $("music-credits").replaceChildren(
+      ...playlist.map((t) => {
+        const el = document.createElement("div");
+        el.textContent = `“${t.title}” by ${t.artist} — ${t.licence}${t.source ? ` (${t.source})` : ""}`;
+        return el;
+      }),
+    );
+  }
+
+  /** Grey out Steam sign-in where the server has no realm configured. */
+  setSteamAvailable(available: boolean): void {
+    const btn = $<HTMLButtonElement>("btn-steam");
+    btn.disabled = !available;
+    if (!available) {
+      $("steam-hint").textContent = "Steam sign-in is not configured on this server.";
+    }
+  }
+
+  private refreshStats(): void {
+    const p = this.profile;
+    if (!p) {
+      $("menu-stats").textContent = "";
+      $("collection-stats").textContent = "";
+      return;
+    }
+    const text = `Battles fought: ${p.gamesPlayed}  ·  Victories: ${p.wins}`;
+    $("menu-stats").textContent = p.persistent
+      ? text
+      : `${text}  ·  guest — nothing is kept when you leave`;
+    $("collection-stats").textContent = p.persistent
+      ? `${text}  ·  progress comes from online battles`
+      : `${text}  ·  sign in through Steam to keep what you unlock`;
+  }
+
+  /** The identity strip on the menu: avatar, name, flag. */
+  private renderMe(): void {
+    const host = $("me");
+    host.replaceChildren();
+    const p = this.profile;
+    if (!p) return;
+    if (p.avatar) {
+      const img = document.createElement("img");
+      img.src = p.avatar;
+      img.alt = "";
+      img.onerror = () => img.remove();
+      host.appendChild(img);
+    }
+    const nick = document.createElement("span");
+    nick.className = "nick";
+    nick.textContent = p.name || "Wanderer";
+    host.appendChild(nick);
+    if (p.country) host.appendChild(flagChip(p.country));
+  }
+
+  // ---- screens ----
+
+  private hideAll(): void {
+    for (const id of ["signin", "menu", "browser", "create", "joinpass", "lobby", "result", "collection"]) {
+      $(id).classList.add("hidden");
+    }
+  }
+
+  showSignIn(): void {
+    this.hideAll();
+    $("signin").classList.remove("hidden");
+    document.body.classList.add("hud-hidden");
+  }
+
+  showMenu(canResume: boolean): void {
+    this.canResume = canResume;
+    this.hideAll();
+    $("menu").classList.remove("hidden");
+    document.body.classList.add("hud-hidden");
+    $("btn-resume").classList.toggle("hidden", !canResume);
+    this.refreshStats();
+    this.renderMe();
+  }
+
+  showBrowser(): void {
+    this.hideAll();
+    $("browser").classList.remove("hidden");
+    document.body.classList.add("hud-hidden");
+  }
+
+  browsing(): boolean {
+    return !$("browser").classList.contains("hidden");
+  }
+
+  private showCreate(): void {
+    this.hideAll();
+    $("create").classList.remove("hidden");
+    const name = $<HTMLInputElement>("table-name");
+    if (!name.value) name.placeholder = `${this.profile?.name ?? "Your"}'s table`;
+    $<HTMLInputElement>("table-pass").value = "";
+  }
+
+  /**
+   * Takes the latest lists and redraws the table under the current search,
+   * filter and sort. Held in a field so typing in the search box or clicking a
+   * column can redraw without waiting for the next poll.
+   */
+  renderLobbies(lobbies: Lobby[], running: RunningTable[]): void {
+    this.lobbies = lobbies;
+    this.running = running;
+    this.drawLobbies();
+  }
+
+  private drawLobbies(): void {
+    const q = $<HTMLInputElement>("lobby-search").value.trim().toLowerCase();
+    const matches = (name: string, host: string, country: string) =>
+      !q ||
+      name.toLowerCase().includes(q) ||
+      host.toLowerCase().includes(q) ||
+      country.toLowerCase().includes(q) ||
+      countryName(country).toLowerCase().includes(q);
+
+    const open = this.filter === "running" ? [] : this.lobbies.filter((l) => matches(l.name, l.host, l.country));
+    const live = this.filter === "open" ? [] : this.running.filter((r) => matches(r.name, r.host, r.country));
+
+    const dir = this.sortDesc ? -1 : 1;
+    open.sort((a, b) => dir * this.compareOpen(a, b));
+    live.sort((a, b) => dir * this.compareRunning(a, b));
+
+    const body = $("lobby-rows");
+    body.replaceChildren();
+    for (const l of open) body.appendChild(this.lobbyRow(l));
+    for (const r of live) body.appendChild(runningRow(r));
+
+    if (!open.length && !live.length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 4;
+      td.className = "empty";
+      td.textContent = q
+        ? `Nothing matches “${$<HTMLInputElement>("lobby-search").value.trim()}”.`
+        : this.filter === "running"
+          ? "Nothing under way at the moment."
+          : "No open tables right now — open one yourself.";
+      tr.appendChild(td);
+      body.appendChild(tr);
+    }
+
+    const total = open.length + live.length;
+    $("lobby-count").textContent = `${total} ${total === 1 ? "table" : "tables"}`;
+    for (const th of Array.from(document.querySelectorAll<HTMLElement>("th.sortable"))) {
+      const on = th.dataset.sort === this.sortKey;
+      th.classList.toggle("on", on);
+      th.querySelector(".arrow")!.textContent = on ? (this.sortDesc ? "▼" : "▲") : "";
+    }
+  }
+
+  private compareOpen(a: Lobby, b: Lobby): number {
+    switch (this.sortKey) {
+      case "players":
+        // Nearly-full tables first: those are the ones about to start.
+        return b.taken / b.players - a.taken / a.players || a.name.localeCompare(b.name);
+      case "age":
+        return a.age - b.age;
+      default:
+        return a.name.localeCompare(b.name);
+    }
+  }
+
+  private compareRunning(a: RunningTable, b: RunningTable): number {
+    switch (this.sortKey) {
+      case "players":
+        return b.players - a.players || a.name.localeCompare(b.name);
+      case "age":
+        return a.minutes - b.minutes;
+      default:
+        return a.name.localeCompare(b.name);
+    }
+  }
+
+  private lobbyRow(l: Lobby): HTMLElement {
+    const row = document.createElement("tr");
+    if (l.yours) row.classList.add("mine");
+
+    const name = document.createElement("td");
+    const box = document.createElement("div");
+    box.className = "tname";
+    box.appendChild(flagChip(l.country));
+    const title = document.createElement("span");
+    title.className = "name";
+    title.textContent = l.name || "A table";
+    title.title = l.name;
+    box.appendChild(title);
+    if (l.locked) {
+      const lock = document.createElement("span");
+      lock.className = "lock";
+      lock.textContent = "🔒";
+      lock.title = "Password required";
+      box.appendChild(lock);
+    }
+    const host = document.createElement("span");
+    host.className = "host";
+    host.textContent = l.host || "someone";
+    box.appendChild(host);
+    name.appendChild(box);
+
+    const seats = document.createElement("td");
+    seats.className = "num";
+    const count = document.createElement("span");
+    count.className = "seats";
+    count.textContent = `${l.taken} / ${l.players}`;
+    seats.appendChild(count);
+
+    const when = document.createElement("td");
+    when.className = "when";
+    when.textContent = ago(l.age);
+
+    const act = document.createElement("td");
+    act.className = "act";
+    const btn = document.createElement("button");
+    btn.className = "primary";
+    btn.textContent = l.yours ? "Return" : "Join";
+    btn.onclick = () => {
+      if (l.locked && !l.yours) {
+        this.askPassword(l);
+        return;
+      }
+      this.h.joinTable(l.gameId, "");
+    };
+    act.appendChild(btn);
+
+    row.append(name, seats, when, act);
+    return row;
+  }
+
+  private askPassword(l: Lobby): void {
+    this.pendingJoin = l.gameId;
+    $("joinpass-name").textContent = `“${l.name}” — ${l.host} keeps this one closed.`;
+    const input = $<HTMLInputElement>("joinpass-input");
+    input.value = "";
+    $("joinpass").classList.remove("hidden");
+    input.focus();
+  }
+
+  /** Back to the browser after a wrong password, keeping the prompt open. */
+  passwordRejected(msg: string): void {
+    this.toast(msg);
+    $<HTMLInputElement>("joinpass-input").select();
+  }
+
+  showLobby(state: GameState): void {
+    this.hideAll();
+    $("lobby").classList.remove("hidden");
+    document.body.classList.add("hud-hidden");
+
+    const free = state.seats.filter((s) => !s.taken).length;
+    const mySeat = state.seats.find((s) => s.you);
+    $("lobbyname").textContent = state.name || "Your table";
+    $("lobbywait").textContent =
+      free === 1 ? "Awaiting one more player…" : `Awaiting ${free} more players…`;
+
+    const host = $("lobbyseats");
+    host.replaceChildren();
+    for (const seat of state.seats) {
+      const info = seatInfo(seat.seat);
+      const line = document.createElement("div");
+      line.className = "seatline" + (seat.taken ? "" : " open");
+      line.style.borderLeftColor = info.css;
+      if (seat.taken && seat.country) line.appendChild(flagChip(seat.country));
+      const who = document.createElement("span");
+      who.className = "who";
+      who.textContent = seat.taken
+        ? `${seat.name || info.colourName}${seat.you ? " (you)" : ""}`
+        : "open seat";
+      line.appendChild(who);
+      host.appendChild(line);
+    }
+    // Anyone seated may start a table that is not filling up — on a table the
+    // house opened, the first seat belongs to the computer, so tying this to
+    // the host would strand the one real player there for ever.
+    $("btn-start").classList.toggle("hidden", !(mySeat && free > 0));
+  }
+
+  showGame(): void {
+    this.hideAll();
+    document.body.classList.remove("hud-hidden");
+    this.disarmResign();
+  }
+
+  showResult(title: string, reason: string): void {
+    $("result-title").textContent = title;
+    $("result-reason").textContent = reason;
+    $("result").classList.remove("hidden");
+  }
+
+  updateFromState(state: GameState, myTurn: boolean): void {
+    if (state.status === "waiting") {
+      this.showLobby(state);
+      return;
+    }
+    this.showGame();
+    const rolling = state.status === "active" && state.phase === "roll";
+    ($("btn-throw") as HTMLButtonElement).classList.toggle("hidden", !(rolling && state.yourRoll));
+    if (rolling) {
+      const waiting = (state.pending ?? []).map((s) => seatName(s));
+      this.status(
+        state.yourRoll
+          ? `Throw for the opening move — click the die (${waiting[0] ?? ""})`
+          : `Waiting for ${waiting.join(", ")} to throw…`,
+      );
+    } else if (state.status === "active") {
+      const opening = !state.capturing ? " · opening round, no strikes" : "";
+      this.status(
+        state.you === "all"
+          ? `${seatName(state.turn)} to move — drag a stone${opening}`
+          : myTurn
+            ? `⚔ Your move — drag a stone${opening}`
+            : `${seatName(state.turn)} is thinking…${opening}`,
+      );
+    }
+    $("seat").textContent =
+      state.you === "all"
+        ? `Practice — you run all ${state.players} seats`
+        : `You are ${seatName(state.you as never)}`;
+    $("gamecode").textContent = state.mode === "online" ? state.name : "";
+    ($("btn-resign") as HTMLButtonElement).disabled = state.status !== "active";
+    this.renderPlayers(state);
+  }
+
+  /** The seat list: colour, who is on the move, and who is out (and why). */
+  private renderPlayers(state: GameState): void {
+    const host = $("players");
+    host.replaceChildren();
+    const lost = new Map<string, number>();
+    for (const p of state.pieces) {
+      if (p.captured) lost.set(p.owner, (lost.get(p.owner) ?? 0) + 1);
+    }
+
+    for (const seat of state.seats) {
+      const info = seatInfo(seat.seat);
+      const row = document.createElement("div");
+      row.className = "player";
+      row.style.borderLeftColor = info.css;
+      if (state.status === "active" && state.turn === seat.seat) row.classList.add("turn");
+      if (seat.out) row.classList.add("gone");
+      if (seat.you && state.you !== "all") row.classList.add("mine");
+
+      const dot = document.createElement("div");
+      dot.className = "dot";
+      dot.style.background = info.css;
+      row.append(dot);
+      if (seat.taken && seat.country) row.append(flagChip(seat.country));
+
+      const who = document.createElement("div");
+      who.className = "who";
+      // Real names once we have them; the seat's colour is the fallback.
+      who.textContent = !seat.taken
+        ? `${info.label} · open seat`
+        : seat.name
+          ? `${seat.name} · ${info.label}`
+          : `${info.label} · ${info.colourName}`;
+
+      const tag = document.createElement("div");
+      tag.className = seat.out ? "tag" : "lost";
+      const throwing = state.phase === "roll" && (state.pending ?? []).includes(seat.seat);
+      if (seat.out) tag.textContent = OUT_CAUSE[seat.cause ?? ""] ?? "out";
+      else if (throwing) {
+        tag.className = "tag";
+        tag.textContent = "to throw";
+        row.classList.add("turn");
+      } else if (state.phase === "play" && state.status === "active" && state.turn === seat.seat) {
+        tag.className = "tag";
+        tag.textContent = "to move";
+      } else {
+        const n = lost.get(seat.seat) ?? 0;
+        tag.textContent = n ? `−${n}` : "";
+      }
+
+      row.append(who, tag);
+      host.appendChild(row);
+    }
+  }
+
+  status(text: string): void {
+    $("status").textContent = text;
+  }
+
+  toast(msg: string, good = false): void {
+    const el = $("toast");
+    el.textContent = msg;
+    el.classList.toggle("good", good);
+    el.classList.add("show");
+    clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => el.classList.remove("show"), 3400);
+  }
+
+  // Two-step resign confirmation without a modal.
+  private onResign(): void {
+    const btn = $("btn-resign");
+    if (Date.now() < this.resignArmed) {
+      this.disarmResign();
+      this.h.resign();
+      return;
+    }
+    this.resignArmed = Date.now() + 3000;
+    btn.textContent = "Sure?";
+    setTimeout(() => {
+      if (Date.now() >= this.resignArmed) this.disarmResign();
+    }, 3100);
+  }
+
+  private disarmResign(): void {
+    this.resignArmed = 0;
+    $("btn-resign").textContent = "Resign";
+  }
+
+  // ---- collection ----
+
+  private showCollection(): void {
+    this.renderCollection();
+    $("collection").classList.remove("hidden");
+  }
+
+  private renderCollection(): void {
+    const list = $("collection-list");
+    list.replaceChildren();
+    const p = this.profile;
+    this.refreshStats();
+
+    const section = (label: string, kind: "skin" | "env") => {
+      const head = document.createElement("div");
+      head.className = "section";
+      head.textContent = label;
+      list.appendChild(head);
+      for (const item of this.catalog.filter((i) => i.kind === kind)) {
+        list.appendChild(this.itemRow(item, p));
+      }
+    };
+    section("PIECE SKINS", "skin");
+    section("ENVIRONMENTS", "env");
+  }
+
+  private itemRow(item: CatalogItem, profile: Profile | null): HTMLElement {
+    const unlocked = !!profile?.unlocked.includes(item.id);
+    const equipped =
+      !!profile &&
+      ((item.kind === "skin" && profile.equippedSkin === item.id) ||
+        (item.kind === "env" && profile.equippedEnv === item.id));
+
+    const row = document.createElement("div");
+    row.className = "item" + (unlocked ? "" : " locked");
+
+    const colors = (item.kind === "skin" ? SKIN_SWATCH : ENV_SWATCH)[item.id] ?? ["#555", "#888"];
+    const swatch = document.createElement("div");
+    swatch.className = "swatch";
+    swatch.style.background = `linear-gradient(135deg, ${colors[0]} 0 50%, ${colors[1]} 50% 100%)`;
+    row.appendChild(swatch);
+
+    const info = document.createElement("div");
+    info.className = "info";
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = item.name;
+    const desc = document.createElement("div");
+    desc.className = "desc";
+    desc.textContent = unlocked
+      ? item.desc
+      : item.needWins > 0
+        ? `Locked — win ${item.needWins} ${item.needWins === 1 ? "battle" : "battles"}`
+        : `Locked — fight ${item.needPlays} battles`;
+    info.append(name, desc);
+    row.appendChild(info);
+
+    const btn = document.createElement("button");
+    btn.textContent = equipped ? "Equipped" : unlocked ? "Equip" : "Locked";
+    if (equipped) btn.classList.add("primary");
+    btn.disabled = !unlocked || equipped;
+    btn.onclick = () => this.h.equip(item.id, item.kind);
+    row.appendChild(btn);
+    return row;
+  }
+}
+
+// ---- small builders ----
+
+function onEnter(input: HTMLInputElement, run: () => void): void {
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") run();
+  });
+}
+
+/** A game under way — shown for the room's sake, never joinable. */
+function runningRow(r: RunningTable): HTMLElement {
+  const row = document.createElement("tr");
+  row.className = "running";
+
+  const name = document.createElement("td");
+  const box = document.createElement("div");
+  box.className = "tname";
+  box.appendChild(flagChip(r.country));
+  const title = document.createElement("span");
+  title.className = "name";
+  title.textContent = r.name || "A game";
+  title.title = r.name;
+  const host = document.createElement("span");
+  host.className = "host";
+  host.textContent = r.host;
+  box.append(title, host);
+  name.appendChild(box);
+
+  const seats = document.createElement("td");
+  seats.className = "num";
+  const count = document.createElement("span");
+  count.className = "seats full";
+  count.textContent = `${r.players} / ${r.players}`;
+  seats.appendChild(count);
+
+  const when = document.createElement("td");
+  when.className = "when";
+  when.textContent = r.ply < 2 ? `just started · ${r.minutes} min` : `move ${r.ply} · ${r.minutes} min`;
+
+  const act = document.createElement("td");
+  act.className = "act";
+  const tag = document.createElement("span");
+  tag.className = "live";
+  tag.textContent = "in progress";
+  act.appendChild(tag);
+
+  row.append(name, seats, when, act);
+  return row;
+}
+
+/** "just now" / "4 min" — the age of an open table. */
+function ago(seconds: number): string {
+  if (seconds < 45) return "just opened";
+  const min = Math.round(seconds / 60);
+  if (min < 60) return `waiting ${min} min`;
+  return `waiting ${Math.round(min / 60)} h`;
+}

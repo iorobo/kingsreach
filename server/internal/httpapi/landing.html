@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kingsreach</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    font-family: Georgia, 'Times New Roman', serif; color: #e8ddc8;
+    background:
+      repeating-linear-gradient(0deg,  rgba(178,34,52,.55) 0 34px, rgba(0,0,0,0) 34px 68px),
+      repeating-linear-gradient(90deg, rgba(178,34,52,.55) 0 34px, rgba(255,246,240,.9) 34px 68px);
+    background-color: #b22234;
+  }
+  .card {
+    background: #2a2624; border: 1px solid #57504a; border-radius: 14px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.55); padding: 42px 48px; max-width: 560px;
+    text-align: center; margin: 24px;
+  }
+  h1 { font-size: 44px; letter-spacing: 5px; margin: 0 0 6px; color: #d9a83a; text-transform: uppercase; }
+  .tag { color: #7fd4c9; font-style: italic; margin-bottom: 26px; }
+  p { line-height: 1.55; color: #cfc4b0; }
+  a.btn {
+    display: inline-block; margin-top: 18px; padding: 13px 30px; border-radius: 10px;
+    background: #d9a83a; color: #241f1c; font-weight: bold; text-decoration: none;
+    font-size: 18px; letter-spacing: 1px;
+  }
+  a.btn:hover { filter: brightness(1.08); }
+  code { background: #1c1918; padding: 2px 7px; border-radius: 5px; color: #7fd4c9; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Kingsreach</h1>
+    <div class="tag">March your king to the Gilded Throne.</div>
+    <p>The 3D client has not been built into <code>web/</code> yet &mdash; run
+       <code>npm run build</code> in <code>client/</code>.</p>
+    <p>No matter &mdash; the realm is open. Play the full game right now with the built-in 2D client:</p>
+    <a class="btn" href="/dev">Enter the board</a>
+  </div>
+</body>
+</html>

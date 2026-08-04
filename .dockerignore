@@ -1,0 +1,8 @@
+.local/
+.git/
+.claude/
+client/node_modules/
+web/
+unity/
+docs/
+*.md

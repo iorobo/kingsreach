@@ -1,0 +1,15 @@
+# Keep line endings stable across machines. Without this, Windows checkouts
+# rewrite every file to CRLF and the next `gofmt`/diff looks like the whole
+# tree changed.
+* text=auto eol=lf
+
+# Windows-only scripts genuinely want CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# Binaries: never touched, never diffed as text.
+*.png binary
+*.jpg binary
+*.glb binary
+*.mp3 binary
+*.gz  binary

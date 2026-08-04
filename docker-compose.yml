@@ -1,0 +1,29 @@
+# Local/self-hosted stack: the game server + PostgreSQL.
+# Mirrors the Easypanel setup (app service from Dockerfile + postgres service).
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: kingsreach
+      POSTGRES_PASSWORD: kingsreach
+      POSTGRES_DB: kingsreach
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kingsreach"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://kingsreach:kingsreach@db:5432/kingsreach?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  dbdata:

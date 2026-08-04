@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kingsreach — dev client</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; font-family: Georgia, 'Times New Roman', serif; color: #e8ddc8;
+    background:
+      repeating-linear-gradient(0deg,  rgba(178,34,52,.55) 0 34px, rgba(0,0,0,0) 34px 68px),
+      repeating-linear-gradient(90deg, rgba(178,34,52,.55) 0 34px, rgba(255,246,240,.9) 34px 68px);
+    background-color: #b22234;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  header { text-align: center; margin: 14px 0 4px; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+  h1 { margin: 0; font-size: 30px; letter-spacing: 6px; color: #f3d27a; text-transform: uppercase; }
+  #status {
+    margin: 6px auto 8px; padding: 7px 18px; border-radius: 999px; background: rgba(26,22,20,.88);
+    border: 1px solid #57504a; font-size: 15px; min-height: 20px; max-width: 90vw;
+  }
+  #wrap { position: relative; width: min(94vw, 78vh); }
+  svg { width: 100%; height: auto; display: block; filter: drop-shadow(0 14px 30px rgba(0,0,0,.5)); }
+  .piece { transition: transform .45s ease; cursor: default; }
+  .piece.mine { cursor: pointer; }
+  .hint { cursor: pointer; animation: pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: .35; } 50% { opacity: .85; } }
+  #bar {
+    display: flex; gap: 10px; align-items: center; margin: 10px 0 20px; flex-wrap: wrap; justify-content: center;
+    background: rgba(26,22,20,.88); border: 1px solid #57504a; border-radius: 12px; padding: 8px 14px;
+  }
+  button {
+    font-family: inherit; font-size: 15px; padding: 8px 16px; border-radius: 8px; border: 1px solid #6b6258;
+    background: #3a342f; color: #e8ddc8; cursor: pointer;
+  }
+  button:hover { background: #4a423b; }
+  button.primary { background: #d9a83a; border-color: #b3872a; color: #241f1c; font-weight: bold; }
+  button.primary:hover { filter: brightness(1.07); }
+  button.danger { border-color: #8a4a3a; color: #e8b0a0; }
+  input {
+    font-family: inherit; font-size: 16px; letter-spacing: 3px; text-transform: uppercase; width: 110px;
+    padding: 8px 10px; border-radius: 8px; border: 1px solid #6b6258; background: #1c1918; color: #f3d27a;
+  }
+  select {
+    font-family: inherit; font-size: 16px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid #6b6258; background: #1c1918; color: #f3d27a;
+  }
+  .chip { padding: 4px 12px; border-radius: 999px; border: 1px solid #57504a; font-size: 14px; background: #241f1c; }
+  .chip b { color: #f3d27a; letter-spacing: 3px; }
+  #overlay, #menu {
+    position: fixed; inset: 0; display: grid; place-items: center; background: rgba(12,10,9,.72); z-index: 10;
+  }
+  .card {
+    background: #2a2624; border: 1px solid #57504a; border-radius: 14px; padding: 30px 38px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.6); text-align: center; max-width: 430px;
+  }
+  .card h2 { margin: 0 0 4px; color: #f3d27a; letter-spacing: 3px; }
+  .card .sub { color: #7fd4c9; font-style: italic; margin-bottom: 20px; }
+  .card .row { display: flex; gap: 10px; justify-content: center; margin: 10px 0; flex-wrap: wrap; }
+  #toast {
+    position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); background: #5c2f28;
+    border: 1px solid #a05242; color: #f3d9c8; padding: 10px 22px; border-radius: 10px; display: none; z-index: 20;
+  }
+  .grave { font-size: 13px; color: #a99e8c; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Kingsreach</h1>
+    <div id="status">…</div>
+  </header>
+
+  <div id="wrap"><svg id="board" xmlns="http://www.w3.org/2000/svg"></svg></div>
+
+  <div id="bar" class="hidden">
+    <span class="chip" id="seatChip"></span>
+    <span class="chip hidden" id="codeChip">code <b id="codeText"></b></span>
+    <span class="grave" id="graveWest"></span>
+    <span class="grave" id="graveEast"></span>
+    <button id="resignBtn" class="danger">Resign</button>
+    <button id="leaveBtn">Leave</button>
+  </div>
+
+  <div id="menu">
+    <div class="card">
+      <h2>KINGSREACH</h2>
+      <div class="sub">March your king to the Gilded Throne.</div>
+      <div class="row">
+        <button class="primary" id="practiceBtn">Practice board</button>
+        <button class="primary" id="createBtn">Create online game</button>
+      </div>
+      <div class="row">
+        <label style="align-self:center;color:#a99e8c;font-size:14px">Players</label>
+        <select id="playerCount">
+          <option value="2" selected>2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+        </select>
+      </div>
+      <div class="row">
+        <select id="tablePick"><option value="">Loading tables…</option></select>
+        <button id="joinBtn">Join table</button>
+      </div>
+      <div class="row">
+        <input id="joinPass" type="password" placeholder="Password (locked tables only)">
+        <button id="refreshBtn">Refresh</button>
+      </div>
+      <div class="row"><button id="resumeBtn" class="hidden">Resume last game</button></div>
+    </div>
+  </div>
+
+  <div id="overlay" class="hidden">
+    <div class="card">
+      <h2 id="resultTitle"></h2>
+      <div class="sub" id="resultReason"></div>
+      <div class="row"><button class="primary" id="backBtn">Back to the great hall</button></div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+<script>
+"use strict";
+const SCALE = 80, NS = "http://www.w3.org/2000/svg";
+
+// Seat palette, mirroring client/src/seats.ts.
+const SEAT_COLOUR = {
+  west:      { fill: "#4a443e", stroke: "#221f1c", pip: "#cfa64c", name: "West (Obsidian)" },
+  southwest: { fill: "#3f8c63", stroke: "#1d4531", pip: "#eae2c8", name: "South-West (Jade)" },
+  southeast: { fill: "#c9a227", stroke: "#6b5512", pip: "#2a2418", name: "South-East (Amber)" },
+  east:      { fill: "#c9884f", stroke: "#7a4d28", pip: "#38291d", name: "East (Ember)" },
+  northeast: { fill: "#4272b8", stroke: "#20395c", pip: "#e3ecf7", name: "North-East (Azure)" },
+  northwest: { fill: "#8e5aa8", stroke: "#472c54", pip: "#f0e6f5", name: "North-West (Plum)" },
+};
+const seatName = (s) => (SEAT_COLOUR[s] || {}).name || s;
+const $ = id => document.getElementById(id);
+const S = { board: null, state: null, token: "", gameId: "", sel: null, hints: new Map(), pieceEls: new Map(), poller: 0 };
+
+function el(name, attrs, parent) {
+  const e = document.createElementNS(NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 3200);
+}
+async function api(path, body) {
+  const opts = body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {};
+  const res = await fetch(path, opts);
+  if (res.status === 204) return null;
+  let data = null;
+  try { data = await res.json(); } catch {}
+  if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
+  return data;
+}
+
+// ---------- board rendering ----------
+const nodePos = new Map();
+let layers = null;
+
+function buildBoard() {
+  const svg = $("board");
+  svg.innerHTML = "";
+  const b = S.board;
+  b.nodes.forEach(n => nodePos.set(n.id, { x: n.x * SCALE, y: n.y * SCALE }));
+
+  const R = 430, pts = [];
+  for (let k = 0; k < 6; k++) {
+    const a = Math.PI / 2 + k * Math.PI / 3;
+    pts.push((R * Math.cos(a)).toFixed(1) + "," + (R * Math.sin(a)).toFixed(1));
+  }
+  svg.setAttribute("viewBox", "-392 -450 784 900");
+  const root = el("g", { transform: "scale(1,-1)" }, svg);
+
+  el("polygon", { points: pts.join(" "), fill: "#2a2624", stroke: "#1a1614", "stroke-width": 10 }, root);
+
+  const edgeL = el("g", {}, root), goldL = el("g", {}, root);
+  layers = {
+    root,
+    path: el("g", {}, root),
+    nodes: el("g", {}, root),
+    hints: el("g", {}, root),
+    pieces: el("g", {}, root),
+  };
+  for (const e of b.edges) {
+    const a = nodePos.get(e.a), c = nodePos.get(e.b);
+    el("line", {
+      x1: a.x, y1: a.y, x2: c.x, y2: c.y,
+      stroke: e.gold ? "#d9a83a" : "#6ec6bb",
+      "stroke-width": e.gold ? 7 : 4, "stroke-linecap": "round",
+      opacity: e.gold ? .95 : .8,
+    }, e.gold ? goldL : edgeL);
+  }
+  for (const n of b.nodes) {
+    const p = nodePos.get(n.id);
+    if (n.center) {
+      el("circle", { cx: p.x, cy: p.y, r: 15, fill: "#d9a83a", stroke: "#8a691f", "stroke-width": 3, "data-node": n.id }, layers.nodes);
+      el("circle", { cx: p.x, cy: p.y, r: 5, fill: "#8a691f", "data-node": n.id }, layers.nodes);
+    } else {
+      el("circle", { cx: p.x, cy: p.y, r: 8, fill: "#49555c", stroke: "#31434a", "stroke-width": 2, "data-node": n.id }, layers.nodes);
+    }
+  }
+  S.pieceEls.clear();
+  svg.onclick = ev => {
+    let t = ev.target;
+    while (t && t !== svg && !(t.dataset && t.dataset.node)) t = t.parentNode;
+    if (t && t.dataset && t.dataset.node) onNode(t.dataset.node);
+  };
+}
+
+function pieceEl(p) {
+  let g = S.pieceEls.get(p.id);
+  if (!g) {
+    g = el("g", { "data-node": "", class: "piece" }, layers.pieces);
+    const seat = SEAT_COLOUR[p.owner] || SEAT_COLOUR.west;
+    el("circle", {
+      cx: 0, cy: 0, r: 26,
+      fill: seat.fill, stroke: seat.stroke, "stroke-width": 3,
+    }, g);
+    const pip = seat.pip;
+    const spots = p.value === 1 ? [[0, 0]] : p.value === 2 ? [[-9, 0], [9, 0]] : [[0, 9], [-8, -6], [8, -6]];
+    for (const [px, py] of spots) el("circle", { cx: px, cy: py, r: 4.6, fill: pip }, g);
+    if (p.value === 1) el("circle", { cx: 0, cy: 0, r: 9.5, fill: "none", stroke: pip, "stroke-width": 2 }, g);
+    const ring = el("circle", { cx: 0, cy: 0, r: 30, fill: "none", stroke: "#7fd4c9", "stroke-width": 4, opacity: 0 }, g);
+    g._ring = ring;
+    S.pieceEls.set(p.id, g);
+  }
+  return g;
+}
+
+function render() {
+  const st = S.state;
+  if (!st || !layers) return;
+  layers.hints.innerHTML = "";
+  layers.path.innerHTML = "";
+
+  if (st.lastMove && st.lastMove.path && st.lastMove.path.length > 1) {
+    const pts = st.lastMove.path.map(id => { const p = nodePos.get(id); return p.x + "," + p.y; }).join(" ");
+    el("polyline", {
+      points: pts, fill: "none", stroke: "#f3d27a", "stroke-width": 6,
+      "stroke-dasharray": "2 14", "stroke-linecap": "round", opacity: .85,
+    }, layers.path);
+    const from = nodePos.get(st.lastMove.from);
+    el("circle", { cx: from.x, cy: from.y, r: 12, fill: "none", stroke: "#f3d27a", "stroke-width": 2.5, opacity: .6 }, layers.path);
+  }
+
+  const seen = new Set();
+  for (const p of st.pieces) {
+    if (p.captured) continue;
+    seen.add(p.id);
+    const g = pieceEl(p);
+    const pos = nodePos.get(p.node);
+    g.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
+    g.dataset.node = p.node;
+    g.classList.toggle("mine", isMine(p));
+    g._ring.setAttribute("opacity", S.sel === p.node ? 1 : 0);
+  }
+  for (const [id, g] of S.pieceEls) if (!seen.has(id)) { g.remove(); S.pieceEls.delete(id); }
+
+  for (const [to] of S.hints) {
+    const p = nodePos.get(to);
+    el("circle", { cx: p.x, cy: p.y, r: 15, fill: "#7fd4c9", class: "hint", "data-node": to }, layers.hints);
+  }
+
+  // HUD
+  $("bar").classList.remove("hidden");
+  $("seatChip").textContent = st.you === "all"
+    ? `practice — you run all ${st.players} seats`
+    : "you are " + seatName(st.you);
+  $("codeChip").classList.toggle("hidden", !(st.mode === "online" && st.status === "waiting"));
+  $("codeText").textContent = st.name || "";
+  grave("graveWest", st);
+  $("resignBtn").disabled = st.status !== "active";
+
+  const my = myTurn();
+  if (st.status === "waiting") {
+    const free = st.seats.filter(s => !s.taken).length;
+    setStatus(`“${st.name}” is open in the browser — awaiting ${free} more…`);
+  } else if (st.status === "active") {
+    const opening = st.capturing ? "" : " · opening round, no strikes";
+    setStatus((st.you === "all" ? seatName(st.turn) + " to move" : (my ? "⚔ Your move" : seatName(st.turn) + " is thinking…")) + opening);
+  } else {
+    showResult(st);
+  }
+}
+// One line per seat: colour, losses, and whether they are still in.
+function grave(id, st) {
+  const parts = st.seats.map(s => {
+    const lost = st.pieces.filter(p => p.captured && p.owner === s.seat).map(p => p.value === 1 ? "♔" : p.value);
+    const mark = s.out ? "✝" : (st.turn === s.seat && st.status === "active" ? "▶" : "·");
+    return `${mark} ${seatName(s.seat).split(" ")[0]}${lost.length ? " " + lost.join("") : ""}`;
+  });
+  $(id).textContent = parts.join("   ");
+}
+function setStatus(html) { $("status").innerHTML = html; }
+function isMine(p) {
+  const st = S.state;
+  if (!st || st.status !== "active") return false;
+  if (st.seats.some(s => s.seat === p.owner && s.out)) return false;
+  if (st.you === "all") return p.owner === st.turn;
+  return st.you === p.owner;
+}
+function myTurn() {
+  const st = S.state;
+  return st && st.status === "active" && (st.you === "all" || st.you === st.turn);
+}
+
+// ---------- interaction ----------
+async function onNode(nodeId) {
+  const st = S.state;
+  if (!st || st.status !== "active" || !myTurn()) return;
+  if (S.sel && S.hints.has(nodeId)) { await doMove(S.sel, nodeId); return; }
+  const p = st.pieces.find(q => !q.captured && q.node === nodeId);
+  if (p && isMine(p)) {
+    S.sel = nodeId; S.hints = new Map();
+    render();
+    try {
+      const res = await api(`/api/games/${S.gameId}/moves?token=${S.token}&from=${encodeURIComponent(nodeId)}`);
+      if (S.sel === nodeId) {
+        S.hints = new Map(res.moves.map(m => [m.to, m.path]));
+        if (!res.moves.length) toast("That piece is walled in — no legal moves.");
+        render();
+      }
+    } catch (e) { toast(e.message); }
+  } else {
+    S.sel = null; S.hints = new Map(); render();
+  }
+}
+async function doMove(from, to) {
+  S.sel = null; S.hints = new Map();
+  try {
+    const st = await api(`/api/games/${S.gameId}/move`, { token: S.token, from, to });
+    applyState(st);
+  } catch (e) { toast(e.message); render(); }
+}
+
+// ---------- lifecycle ----------
+function applyState(st) {
+  if (S.state && st.version < S.state.version) return;
+  S.state = st;
+  render();
+  if (st.status === "finished") stopPolling();
+}
+function showResult(st) {
+  const reasons = {
+    "throne": "the King has reached the Gilded Throne",
+    "last-standing": "every rival has fallen",
+    "move-limit": "the long war exhausts every host — a draw",
+  };
+  let title;
+  if (!st.winner) title = "A weary peace";
+  else if (st.you === "all") title = seatName(st.winner) + " is victorious";
+  else title = st.winner === st.you ? "Victory is yours" : seatName(st.winner) + " is victorious";
+  $("resultTitle").textContent = title;
+  $("resultReason").textContent = reasons[st.winReason] || st.winReason;
+  $("overlay").classList.remove("hidden");
+  setStatus(title);
+}
+function startPolling() {
+  stopPolling();
+  S.poller = setInterval(async () => {
+    if (!S.gameId) return;
+    try {
+      const st = await api(`/api/games/${S.gameId}?token=${S.token}&v=${S.state ? S.state.version : 0}`);
+      if (st) applyState(st);
+    } catch {}
+  }, 1200);
+}
+function stopPolling() { if (S.poller) clearInterval(S.poller); S.poller = 0; }
+
+function enterGame(res) {
+  S.token = res.token || S.token;
+  S.gameId = res.gameId;
+  S.sel = null; S.hints = new Map();
+  localStorage.setItem("kingsreach", JSON.stringify({ gameId: S.gameId, token: S.token }));
+  $("menu").classList.add("hidden");
+  $("overlay").classList.add("hidden");
+  if (layers) { layers.pieces.innerHTML = ""; S.pieceEls.clear(); }
+  applyState(res);
+  startPolling();
+}
+function leave() {
+  stopPolling();
+  localStorage.removeItem("kingsreach");
+  S.state = null; S.gameId = ""; S.token = ""; S.sel = null; S.hints = new Map();
+  if (layers) { layers.pieces.innerHTML = ""; layers.hints.innerHTML = ""; layers.path.innerHTML = ""; S.pieceEls.clear(); }
+  $("overlay").classList.add("hidden");
+  $("bar").classList.add("hidden");
+  $("menu").classList.remove("hidden");
+  setStatus("Welcome to the great hall.");
+  checkResume();
+}
+async function checkResume() {
+  const saved = localStorage.getItem("kingsreach");
+  const btn = $("resumeBtn");
+  btn.classList.add("hidden");
+  if (!saved) return;
+  try {
+    const { gameId, token } = JSON.parse(saved);
+    const st = await api(`/api/games/${gameId}?token=${token}`);
+    if (st && st.status !== "finished") {
+      btn.classList.remove("hidden");
+      btn.onclick = () => { S.token = token; enterGame(st); };
+    } else localStorage.removeItem("kingsreach");
+  } catch { localStorage.removeItem("kingsreach"); }
+}
+
+const playerCount = () => Number($("playerCount").value) || 2;
+$("practiceBtn").onclick = async () => { try { enterGame(await api("/api/games", { mode: "practice", players: playerCount() })); } catch (e) { toast(e.message); } };
+$("createBtn").onclick = async () => { try { enterGame(await api("/api/games", { mode: "online", players: playerCount() })); } catch (e) { toast(e.message); } };
+// The lobby browser, in its plainest form: a dropdown of open tables.
+async function refreshTables() {
+  const pick = $("tablePick");
+  try {
+    const { lobbies } = await api("/api/lobbies");
+    pick.innerHTML = "";
+    if (!lobbies.length) {
+      pick.appendChild(new Option("no open tables", ""));
+      return;
+    }
+    for (const l of lobbies) {
+      const label = `${l.locked ? "🔒 " : ""}${l.name} — ${l.host} (${l.country || "??"}) ${l.taken}/${l.players}`;
+      pick.appendChild(new Option(label, l.gameId));
+    }
+  } catch (e) {
+    pick.innerHTML = "";
+    pick.appendChild(new Option("could not list tables", ""));
+  }
+}
+$("refreshBtn").onclick = refreshTables;
+$("joinBtn").onclick = async () => {
+  const gameId = $("tablePick").value;
+  if (!gameId) { toast("Pick a table first."); return; }
+  const password = $("joinPass").value;
+  try { enterGame(await api("/api/games/join", { gameId, password })); } catch (e) { toast(e.message); }
+};
+$("resignBtn").onclick = async () => {
+  if (!confirm("Lay down your banner and resign?")) return;
+  try { applyState(await api(`/api/games/${S.gameId}/resign`, { token: S.token })); } catch (e) { toast(e.message); }
+};
+$("leaveBtn").onclick = leave;
+$("backBtn").onclick = leave;
+
+(async function init() {
+  setStatus("Preparing the board…");
+  try {
+    S.board = await api("/api/board");
+    buildBoard();
+    setStatus("Welcome to the great hall.");
+  } catch (e) { setStatus("Cannot reach the server: " + e.message); return; }
+  checkResume();
+  refreshTables();
+})();
+</script>
+</body>
+</html>

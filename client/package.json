@@ -1,0 +1,18 @@
+{
+  "name": "kingsreach-client",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Kingsreach browser frontend — Babylon.js + TypeScript, bundled into ../web",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@babylonjs/core": "^7.54.3",
+    "@babylonjs/loaders": "^7.54.3",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.3"
+  }
+}
