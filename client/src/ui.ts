@@ -1,4 +1,6 @@
 import type { CatalogItem, GameState, Lobby, Profile, RunningTable } from "./api";
+import type { Credit } from "./credits";
+import { ASSET_CREDITS, creditLine } from "./credits";
 import { countryList, countryName, flagChip } from "./flags";
 import type { Track } from "./music";
 import { seatInfo, seatName } from "./seats";
@@ -245,15 +247,22 @@ export class Ui {
       this.nowPlayingTimer = window.setTimeout(() => line.classList.add("faded"), 6000);
     }
 
-    // Attribution is a licence condition for these tracks, so it is rendered
-    // from the track data and cannot drift out of sync with the playlist.
-    $("music-credits").replaceChildren(
-      ...playlist.map((t) => {
-        const el = document.createElement("div");
-        el.textContent = `“${t.title}” by ${t.artist} — ${t.licence}${t.source ? ` (${t.source})` : ""}`;
-        return el;
-      }),
-    );
+    this.renderCredits(playlist);
+  }
+
+  /**
+   * Everything borrowed, credited. All of it is CC-BY, which requires the
+   * attribution to reach the people using the work — so it is rendered from
+   * the asset data and cannot drift out of sync with what actually ships.
+   */
+  private renderCredits(playlist: readonly Track[]): void {
+    const tracks: Credit[] = playlist.map((t) => ({
+      title: t.title,
+      author: t.artist,
+      licence: t.licence,
+      source: t.source,
+    }));
+    $("credits").replaceChildren(...[...tracks, ...ASSET_CREDITS].map(creditLine));
   }
 
   /** Grey out Steam sign-in where the server has no realm configured. */

@@ -411,9 +411,12 @@ browser with `locked: true` — you can see it exists, you just cannot sit down 
   playback actually starts, so a player who mutes never downloads a byte; the Go server answers
   range requests, so the track streams instead of arriving in one lump. Browsers refuse audio
   until a user gesture, so the first click anywhere starts it. Mute persists in `localStorage`.
-  **The `licence` field is load-bearing** — the current track is Creative Commons Attribution,
-  which requires the credit shown, so the Collection screen renders it from the track data rather
-  than a hard-coded string. Keep it accurate when adding tracks.
+- **Credits are data, not prose** (`credits.ts` + the `licence` fields in `music.ts`). Every
+  borrowed asset here is Creative Commons Attribution, and CC-BY requires the credit to reach the
+  people *using* the work — a line in a README nobody opens does not discharge it. So the
+  Collection screen renders the credits from the same arrays that declare the assets, and they
+  cannot drift out of sync with what actually ships. A complete credit is four things: title,
+  author, licence, source. Adding an asset means adding a row.
 - **Opening roll:** the die (`client/static/models/dice.glb`, ~89 KB) hovers over the board
   turning gently until the player throws it — by clicking it or the *Throw the die* button. Each
   seat throws its own; ties send only the tied seats back. Driven entirely by the server's

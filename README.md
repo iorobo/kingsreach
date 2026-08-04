@@ -181,14 +181,21 @@ docs/      original Dutch rules
 
 ### Third-party assets
 
-`client/static/models/de-dust2.glb` is a conversion of the Counter-Strike map *de_dust2*.
-The map and its textures are Valve Corporation's intellectual property — fine for local
-experimentation, **not** something to ship on a public deployment. Swap it out (or get
-permission) before putting this online.
+Everything borrowed here is **Creative Commons Attribution**, which means the credit is a
+condition of use, not a nicety — so it is shown in the game's Collection screen, rendered from
+`client/src/credits.ts` and `client/src/music.ts` rather than hard-coded. Add an asset, add a row.
 
-`client/static/models/dice.glb` is a supplied model (Sketchfab export). Neither archive
-carried a licence file, so no attribution terms could be verified — check them before this
-goes anywhere public.
+| Asset | Work | By | Licence |
+|---|---|---|---|
+| `client/static/models/de-dust2.glb` | [de_dust2 - CS map](https://sketchfab.com/3d-models/de-dust2-cs-map-056008d59eb849a29c0ab6884c0c3d87) | pancakesbassoondonut (Sketchfab) | CC BY 4.0 |
+| `client/static/models/dice.glb` | [Dice](https://sketchfab.com/3d-models/dice-3b955af797e140eca0947ede57f412ba) | tnRaro (Sketchfab) | CC BY 4.0 |
+| `client/static/audio/magic-escape-room.mp3` | Magic Escape Room | Kevin MacLeod (incompetech.com) | CC BY 4.0 |
+
+One caveat on the map: the CC-BY licence is the uploader's, and covers the conversion work they
+did. The underlying *de_dust2* level and its textures are Valve Corporation's, and a third party
+cannot place those under CC-BY. If this is ever deployed publicly rather than kept private,
+that is worth resolving — replacing the model is the easy path, since `buildDust2` in
+`client/src/environments.ts` is the only thing that loads it.
 
 `client/static/images/steam-signin.png` is Valve's own sign-in button from
 [steamcommunity.com/dev](https://steamcommunity.com/dev), served from our origin rather than
