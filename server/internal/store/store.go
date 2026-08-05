@@ -39,7 +39,7 @@ func (g *GameRecord) HasBot() bool {
 type GameRecord struct {
 	ID      string
 	Code    string
-	Mode    string // "online" | "practice"
+	Mode    string // "online" | "offline" ("practice" in rows predating the rename)
 	Status  string // "waiting" | "active" | "finished"
 	Players int    // seats at this table (2–4)
 	Seats   []Seat
@@ -151,6 +151,9 @@ type Store interface {
 	UpdateProfileIdentity(ctx context.Context, p *Profile) error
 	UpdateProfileEquip(ctx context.Context, id, skin, env string) error
 	BumpProfileStats(ctx context.Context, id string, win bool) error
+	// Leaderboard returns signed-in players with at least minWins victories,
+	// best first. Guests are never listed — they keep no progress to rank.
+	Leaderboard(ctx context.Context, minWins, limit int) ([]*Profile, error)
 
 	Name() string
 	Ping(ctx context.Context) error

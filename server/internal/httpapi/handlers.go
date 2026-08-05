@@ -35,6 +35,23 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Game modes. "practice" was the old name for a table one person runs; it is
+// still accepted so saved games from before the rename keep working.
+const (
+	ModeOnline  = "online"
+	ModeOffline = "offline"
+)
+
+func normaliseMode(mode string) string {
+	switch mode {
+	case "", ModeOnline:
+		return ModeOnline
+	case ModeOffline, "practice":
+		return ModeOffline
+	}
+	return "" // unknown
+}
+
 // rollDie returns a fair 1..6 from the same source as the table identifiers.
 func rollDie() int {
 	n, err := rand.Int(rand.Reader, big.NewInt(6))
@@ -59,12 +76,9 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"` // empty = open to anyone
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req) // body is optional; defaults below
-	mode := req.Mode
+	mode := normaliseMode(req.Mode)
 	if mode == "" {
-		mode = "online"
-	}
-	if mode != "online" && mode != "practice" {
-		writeErr(w, http.StatusBadRequest, "mode must be online or practice")
+		writeErr(w, http.StatusBadRequest, "mode must be online or offline")
 		return
 	}
 	players := req.Players
@@ -109,12 +123,12 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		PasswordHash: hashPassword(req.Password, salt),
 		HostName:     hostName,
 		HostCountry:  hostCountry,
-		Listed:       mode == "online",
+		Listed:       mode == ModeOnline,
 	}
 	for i, seat := range seatOrder {
-		// The creator always takes the first seat; in practice one player
-		// runs the whole table.
-		mine := i == 0 || mode == "practice"
+		// The creator always takes the first seat; offline, one player runs
+		// the whole table so a group can share the screen.
+		mine := i == 0 || mode == ModeOffline
 		st := store.Seat{Seat: seat, Skin: skin, Taken: mine}
 		if mine {
 			st.Token, st.Profile = token, profileID
@@ -260,15 +274,28 @@ func (s *Server) handleMoves(w http.ResponseWriter, r *http.Request) {
 	type moveOption struct {
 		To   string   `json:"to"`
 		Path []string `json:"path"`
+		// Captures names the piece standing there, so the client can light a
+		// strike differently from an empty field — and knows that clicking
+		// that stone means "take it" rather than "select it".
+		Captures string `json:"captures,omitempty"`
 	}
 	out := struct {
 		Moves []moveOption `json:"moves"`
 	}{Moves: []moveOption{}}
 	if rec.Status == "active" {
+		occupied := map[game.NodeID]*game.Piece{}
+		for _, p := range rec.State.Pieces {
+			if !p.Captured {
+				occupied[p.Node] = p
+			}
+		}
 		for to, path := range s.board.LegalMovesFrom(rec.State, from) {
 			opt := moveOption{To: string(to)}
 			for _, n := range path {
 				opt.Path = append(opt.Path, string(n))
+			}
+			if victim, ok := occupied[to]; ok {
+				opt.Captures = string(victim.ID)
 			}
 			out.Moves = append(out.Moves, opt)
 		}
@@ -333,7 +360,7 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 	}
 	if rec.Status == "finished" {
 		logf("game %s finished: winner=%s (%s)", rec.ID, rec.State.Winner, rec.State.WinReason)
-		s.awardStats(r, rec)
+		s.awardStats(r.Context(), rec)
 	}
 	writeJSON(w, http.StatusOK, toClientState(rec, req.Token))
 }
@@ -449,7 +476,7 @@ func (s *Server) handleResign(w http.ResponseWriter, r *http.Request) {
 	}
 	logf("game %s: %s resigned", rec.ID, quitter)
 	if rec.Status == "finished" {
-		s.awardStats(r, rec)
+		s.awardStats(r.Context(), rec)
 	}
 	writeJSON(w, http.StatusOK, toClientState(rec, req.Token))
 }

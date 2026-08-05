@@ -71,6 +71,7 @@ func New(st store.Store, staticDir string) *Server {
 	s.mux.HandleFunc("POST /api/games/join", s.handleJoin)
 	s.mux.HandleFunc("POST /api/games/{id}/start", s.handleLobbyStart)
 	s.mux.HandleFunc("GET /api/lobbies", s.handleLobbies)
+	s.mux.HandleFunc("GET /api/leaderboard", s.handleLeaderboard)
 	s.mux.HandleFunc("GET /api/board", s.handleBoard)
 	s.mux.HandleFunc("GET /api/config", s.handleConfig)
 	s.mux.HandleFunc("GET /api/geo", s.handleGeo)

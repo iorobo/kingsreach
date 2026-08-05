@@ -344,6 +344,34 @@ func (p *Postgres) BumpProfileStats(ctx context.Context, id string, win bool) er
 	return err
 }
 
+func (p *Postgres) Leaderboard(ctx context.Context, minWins, limit int) ([]*Profile, error) {
+	rows, err := p.pool.Query(ctx, `
+		SELECT id, token, kind, name, avatar, country, steam_id,
+		       games_played, wins, equipped_skin, equipped_env, created_at, updated_at
+		FROM profiles
+		WHERE kind = 'steam' AND wins >= $1
+		ORDER BY wins DESC, games_played ASC, name ASC
+		LIMIT $2`, minWins, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*Profile{}
+	for rows.Next() {
+		p := &Profile{}
+		var steamID *string
+		if err := rows.Scan(&p.ID, &p.Token, &p.Kind, &p.Name, &p.Avatar, &p.Country, &steamID,
+			&p.GamesPlayed, &p.Wins, &p.EquippedSkin, &p.EquippedEnv, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if steamID != nil {
+			p.SteamID = *steamID
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) AppendMove(ctx context.Context, gameID string, ply int, mv *game.MoveRecord) error {
 	pathJSON, err := json.Marshal(mv.Path)
 	if err != nil {

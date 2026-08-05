@@ -81,7 +81,7 @@ func (s *Server) runningTables(ctx context.Context, seenHost, seenName map[strin
 			// A practice board is one player against themselves, and a game
 			// nobody has touched in ten minutes has been walked away from.
 			// Neither belongs on a list of games you could be watching.
-			if g.Mode != "online" || time.Since(g.UpdatedAt) > 10*time.Minute {
+			if g.Mode != ModeOnline || time.Since(g.UpdatedAt) > 10*time.Minute {
 				continue
 			}
 			if seenHost[g.HostName] || seenName[nameKey(g.Name)] {
@@ -108,7 +108,7 @@ func (s *Server) runningTables(ctx context.Context, seenHost, seenName map[strin
 	// list stays put between polls instead of flickering.
 	bucket := time.Now().Unix() / 90
 	rng := mrand.New(mrand.NewSource(bucket))
-	want := 9 + rng.Intn(8)
+	want := 1 + rng.Intn(8) // one to eight games under way
 
 	// One table per host, and no two tables with the same name. A room where
 	// Yuki is playing twice under an identical title reads as a generator, not
@@ -214,7 +214,7 @@ func (s *Server) seedLobbies(ctx context.Context) {
 	// Re-roll the target every pass so the count drifts the way a real
 	// browser would rather than sitting on a constant.
 	if s.seedTarget == 0 || live == 0 {
-		s.seedTarget = randRange(1, 4)
+		s.seedTarget = randRange(1, 2)
 	}
 	for live < s.seedTarget {
 		host, ok := freeHost(taken)
@@ -250,7 +250,7 @@ func (s *Server) createBotLobby(ctx context.Context, host botHost) error {
 	}
 	seatOrder := game.SeatOrder(players)
 	rec := &store.GameRecord{
-		ID: randHex(12), Mode: "online", Status: "waiting", Players: players,
+		ID: randHex(12), Mode: ModeOnline, Status: "waiting", Players: players,
 		State:   game.NewState(seatOrder, seatOrder[0]),
 		Version: 1,
 		Name:    tableNameFor(host, cryptoPick), HostName: host.Name, HostCountry: host.Country,
@@ -383,6 +383,13 @@ func (s *Server) stepOneGame(ctx context.Context, id string, rng *mrand.Rand) {
 	}
 	if err := s.st.AppendMove(ctx, rec.ID, rec.State.Ply, moveRec); err != nil {
 		logf("game %s: bot move history write failed: %v", rec.ID, err)
+	}
+	// The computer ends plenty of games — by winning, or by walling the last
+	// rival in. Those count exactly as much as the ones a player ends, so the
+	// tally has to happen here too and not only on the human move path.
+	if rec.Status == "finished" {
+		logf("game %s finished: winner=%s (%s)", rec.ID, rec.State.Winner, rec.State.WinReason)
+		s.awardStats(ctx, rec)
 	}
 }
 

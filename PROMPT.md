@@ -30,8 +30,8 @@ Two game modes:
 
 | Mode | Description |
 |---|---|
-| `online` | The creator opens a named table; others find it in the lobby browser and take a free seat. Optionally password-protected. |
-| `practice` | One browser controls every seat (hot-seat / testing). |
+| `online` | The creator opens a named table; others find it in the lobby browser and take a free seat. Optionally password-protected. The only mode that records anything. |
+| `offline` | One browser runs every seat, so a group can share a screen. **Records nothing** — no played games, no victories, no unlocks. It was called `practice`; the old name is still accepted on input and normalised. |
 
 ---
 
@@ -204,6 +204,7 @@ web/                       ← build output (generated, git-ignored)
 | `GET /api/board` | – | board graph `{nodes:[{id,x,y,center}], edges:[{a,b,gold}]}` |
 | `GET /api/config` | – | `{"steam":bool,"unlockAll":bool}` — which sign-in routes this server offers |
 | `GET /api/geo` | – | `{"country":"NL"}` — the country guessed from the caller's address, `""` when unknown. Never an error |
+| `GET /api/leaderboard` | `?token=…` | `{minWins, entries:[…], you, winsNeeded}` — see §3.6 |
 | `GET /api/games/{id}` | `?token=…&v=N` | full state, or `204` if version still `N` |
 | `GET /api/games/{id}/moves` | `?token=…&from=nodeId` | `{moves:[{to, path:[…]}]}` legal moves for that piece |
 | `POST /api/games/{id}/move` | `{"token","from","to"}` | new state (or `409` + error for illegal moves) |
@@ -364,7 +365,25 @@ upper-cased — Japanese has no case, and Go's `ToUpper` turns Turkish "i" into 
 Passwords are salted SHA-256 (`sha256(salt \0 password)`). A locked table still shows in the
 browser with `locked: true` — you can see it exists, you just cannot sit down without the word.
 
-### 3.6 Engine invariants (unit-tested)
+### 3.6 Standings
+
+Twenty victories (`LeaderboardMinWins`) buy a place in the hall of champions. Below that a player
+is **absent** — not ranked low, not greyed out — which is what makes arriving on it mean anything.
+`winsNeeded` tells them the distance instead. Guests can never be ranked and are never given a
+target, since they keep no progress to rank.
+
+`awardStats` decides what counts, and two of its rules were bugs found in play:
+
+- A win needs a genuine opponent: another profile **or the computer**. The original rule demanded
+  two human profiles, so every victory over the AI was silently dropped.
+- The computer finishes plenty of games itself — by winning, or by walling the last rival in — so
+  `stepOneGame` has to award stats too. Only the human move path did, which meant a game lost to
+  the AI was not even recorded as played.
+
+Self-play is still worth nothing: one profile in two seats is not a contest. Offline records
+nothing at all.
+
+### 3.7 Engine invariants (unit-tested)
 
 - Board: 55 nodes, 78 edges, exactly 6 gold edges, Throne degree 6, kings start at `±8,0`.
 - Exact-step DFS: a 2 can never "bounce" back to its start; blocked first steps ⇒ no moves.
@@ -417,6 +436,14 @@ browser with `locked: true` — you can see it exists, you just cannot sit down 
   Collection screen renders the credits from the same arrays that declare the assets, and they
   cannot drift out of sync with what actually ships. A complete credit is four things: title,
   author, licence, source. Adding an asset means adding a row.
+- **Strikes look and behave differently from ordinary moves.** `GET .../moves` returns `captures`
+  (the victim's piece id) alongside each destination, so the client can mark a strike with a red
+  ring *around* the stone rather than a teal disc under it. Two details make it legible: the ring
+  is excluded from the `GlowLayer`, whose bloom washes strong colours to white, and its material
+  is `unlit` — a lit torus blows out where the light hits it, which is fine for a stone and
+  useless for a warning. Clicking the enemy stone captures it: the piece sits on top of its own
+  marker, so the pick never reaches the ring underneath, and without that case a capture could
+  only be made by dragging.
 - **Opening roll:** the die (`client/static/models/dice.glb`, ~89 KB) hovers over the board
   turning gently until the player throws it — by clicking it or the *Throw the die* button. Each
   seat throws its own; ties send only the tied seats back. Driven entirely by the server's

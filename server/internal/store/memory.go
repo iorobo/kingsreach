@@ -214,3 +214,30 @@ func (m *Memory) BumpProfileStats(ctx context.Context, id string, win bool) erro
 	p.UpdatedAt = time.Now().UTC()
 	return nil
 }
+
+func (m *Memory) Leaderboard(ctx context.Context, minWins, limit int) ([]*Profile, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []*Profile{}
+	for _, p := range m.profByID {
+		if !p.Persistent() || p.Wins < minWins {
+			continue
+		}
+		q := *p
+		out = append(out, &q)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Wins != out[j].Wins {
+			return out[i].Wins > out[j].Wins
+		}
+		// Fewer games for the same number of wins is the better record.
+		if out[i].GamesPlayed != out[j].GamesPlayed {
+			return out[i].GamesPlayed < out[j].GamesPlayed
+		}
+		return out[i].Name < out[j].Name
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}

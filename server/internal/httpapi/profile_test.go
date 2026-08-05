@@ -146,11 +146,58 @@ func TestProfileProgressionAndEquip(t *testing.T) {
 		t.Fatalf("new game should snapshot equipped skin, got %v", seatsOf(g2)[0])
 	}
 
-	// Practice with one profile: played +1, never a win.
-	_, p := request(t, "POST", ts.URL+"/api/games", map[string]string{"mode": "practice", "profile": tokA})
+	// Offline is for a group round one screen; it records nothing at all.
+	_, p := request(t, "POST", ts.URL+"/api/games", map[string]string{"mode": "offline", "profile": tokA})
 	request(t, "POST", ts.URL+"/api/games/"+p["gameId"].(string)+"/resign", map[string]string{"token": p["token"].(string)})
 	_, a3 := request(t, "GET", fmt.Sprintf("%s/api/profile?token=%s", ts.URL, tokA), nil)
-	if int(a3["gamesPlayed"].(float64)) != 2 || int(a3["wins"].(float64)) != 0 {
-		t.Fatalf("practice stats wrong (want played=2 wins=0): %v", a3)
+	if int(a3["gamesPlayed"].(float64)) != 1 || int(a3["wins"].(float64)) != 0 {
+		t.Fatalf("offline must record nothing (want played=1 wins=0): %v", a3)
+	}
+	// The old name still works, and still records nothing.
+	_, q := request(t, "POST", ts.URL+"/api/games", map[string]string{"mode": "practice", "profile": tokA})
+	if q["mode"] != "offline" {
+		t.Fatalf("legacy \"practice\" should normalise to offline, got %v", q["mode"])
+	}
+}
+
+// Beating the computer is a win. This is the case that was silently dropped:
+// the old rule needed two human profiles at the table.
+func TestWinningAgainstTheComputerCounts(t *testing.T) {
+	ts := testServer(t)
+	tok := signedIn(t, ts, "76561190000000009", "Solo")
+
+	_, g := request(t, "POST", ts.URL+"/api/games",
+		map[string]any{"mode": "online", "players": 2, "profile": tok, "name": "me vs the house"})
+	id, token := g["gameId"].(string), g["token"].(string)
+
+	// Start short-handed so the computer takes the other seat.
+	code, st := request(t, "POST", ts.URL+"/api/games/"+id+"/start", map[string]string{"token": token})
+	if code != 200 {
+		t.Fatalf("start: %d %v", code, st)
+	}
+	// The computer resigns for us by way of the human winning: resign from the
+	// bot's seat is not reachable, so drive it from the state instead.
+	srv := ts.Config.Handler.(*Server)
+	rec, err := srv.st.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	me, ok := rec.SeatFor(token)
+	if !ok {
+		t.Fatal("we hold no seat")
+	}
+	rec.State.Status, rec.State.Winner, rec.State.WinReason = "finished", me.Seat, "throne"
+	rec.Status = "finished"
+	if err := srv.st.Update(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+	srv.awardStats(context.Background(), rec)
+
+	_, after := request(t, "GET", ts.URL+"/api/profile?token="+tok, nil)
+	if int(after["wins"].(float64)) != 1 {
+		t.Fatalf("beating the computer should count as a win: %v", after)
+	}
+	if int(after["gamesPlayed"].(float64)) != 1 {
+		t.Fatalf("games played = %v, want 1", after["gamesPlayed"])
 	}
 }

@@ -33,7 +33,30 @@ const options = {
 const mainBundle = options.outfile;
 
 await mkdir(outDir, { recursive: true });
-await cp(path.join(here, "static"), outDir, { recursive: true });
+await copyStatic(path.join(here, "static"), outDir);
+
+/**
+ * Mirrors static/ into the output, skipping files that are already identical.
+ *
+ * A plain recursive copy re-writes every asset on every build, which means the
+ * 26 MB of audio too — and Windows refuses to unlink a file a browser is
+ * currently streaming, so an open game tab was enough to fail the build.
+ * Nothing needs copying when size and mtime already match.
+ */
+async function copyStatic(from, to) {
+  await mkdir(to, { recursive: true });
+  for (const entry of await readdir(from, { withFileTypes: true })) {
+    const src = path.join(from, entry.name);
+    const dst = path.join(to, entry.name);
+    if (entry.isDirectory()) {
+      await copyStatic(src, dst);
+      continue;
+    }
+    const [a, b] = await Promise.all([stat(src), stat(dst).catch(() => null)]);
+    if (b && b.size === a.size && b.mtimeMs >= a.mtimeMs) continue;
+    await cp(src, dst);
+  }
+}
 
 if (watch) {
   const ctx = await context(options);

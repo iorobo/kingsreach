@@ -6,7 +6,7 @@ export interface BoardEdge { a: string; b: string; gold: boolean; }
 export interface BoardDto { nodes: BoardNode[]; edges: BoardEdge[]; }
 
 export type Seat = "west" | "southwest" | "southeast" | "east" | "northeast" | "northwest";
-/** Which seat(s) the caller controls; "all" means the whole table (practice). */
+/** Which seat(s) the caller controls; "all" means the whole table (offline). */
 export type Control = Seat | "all" | "";
 
 export interface PieceDto {
@@ -47,7 +47,7 @@ export interface GameState {
   code: string;
   /** Table name, as it appears in the lobby browser. */
   name: string;
-  mode: "online" | "practice";
+  mode: "online" | "offline";
   status: "waiting" | "active" | "finished";
   players: number;
   seats: SeatDto[];
@@ -77,7 +77,12 @@ export interface RollResult extends GameState {
   rolled: number;
 }
 
-export interface MoveOption { to: string; path: string[]; }
+export interface MoveOption {
+  to: string;
+  path: string[];
+  /** Id of the piece standing there — set only when this move is a strike. */
+  captures?: string;
+}
 
 export interface CatalogItem {
   id: string;
@@ -114,6 +119,25 @@ export interface Lobby {
   locked: boolean;
   age: number;
   yours: boolean;
+}
+
+/** One line of the hall of champions. */
+export interface RankEntry {
+  rank?: number;
+  name: string;
+  avatar?: string;
+  country?: string;
+  wins: number;
+  played: number;
+  you?: boolean;
+}
+
+export interface Standings {
+  minWins: number;
+  entries: RankEntry[];
+  you?: RankEntry;
+  /** Victories still needed to appear; 0 once you are on it, or cannot be. */
+  winsNeeded: number;
 }
 
 /** A table already under way — shown, but never joinable. */
@@ -170,13 +194,16 @@ export const api = {
   equip: (token: string, what: { skin?: string; env?: string }) =>
     request<Profile>("/api/profile/equip", { token, ...what }) as Promise<Profile>,
 
+  leaderboard: (token: string) =>
+    request<Standings>(`/api/leaderboard?token=${encodeURIComponent(token)}`) as Promise<Standings>,
+
   lobbies: (token: string) =>
     request<{ lobbies: Lobby[]; running: RunningTable[] }>(
       `/api/lobbies?token=${encodeURIComponent(token)}`,
     ) as Promise<{ lobbies: Lobby[]; running: RunningTable[] }>,
 
   createGame: (opts: {
-    mode: "online" | "practice";
+    mode: "online" | "offline";
     players: number;
     profile: string;
     name?: string;

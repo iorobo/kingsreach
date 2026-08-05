@@ -31,8 +31,13 @@ Sign in through **Steam** — your name and avatar come along — or just pick a
 guest. Then open the **board room**: every table waiting for players is listed with its host,
 their flag, how many seats are filled and whether it needs a password. Take a seat, or open your
 own table (2, 3 or 4 seats, name it, lock it if you like) and start when it fills — or hit
-*Start now* and let the computer take the empty seats. There is also a practice board where you
-run every seat yourself.
+*Start now* and let the computer take the empty seats.
+
+**Offline** is for a group round one screen: every seat is played from the same browser, taking
+turns. It records nothing — no victories, no unlocks — which is the point of it.
+
+Twenty victories earn a place in the **hall of champions**. Below that you do not appear on it at
+all; the screen tells you how many wins you still need. Beating the computer counts.
 
 Dice decide who opens and **you throw them yourself**: a die hovers over the board — click it
 (or press *Throw the die*) and it tumbles. Every player throws one; highest opens, and a tie
@@ -40,7 +45,8 @@ sends just the tied players back to the dice. The value is rolled on the server 
 throw, so the animation is showing you a real result.
 
 Drag one of your stones: it lifts off the cloth and every legal destination lights up; drop it on
-one to move (or click the stone, then click a lit field). Drag anywhere else to orbit the board,
+one to move (or click the stone, then click a lit field). A stone you can **take** is circled in
+red — click it and it is yours, no dragging needed. Drag anywhere else to orbit the board,
 scroll to zoom, and press **Focus** to swing back to your own side of the table. Stones you lose
 are laid out beside the board on your side, and the seat list on the left shows whose turn it is
 and who has been knocked out.
@@ -165,7 +171,8 @@ by putting its code in `hostOrigins` and its phrases in `tableNamesByLang`, both
 → `{lobbies, running}` · `GET /api/board` → graph · `GET /api/config` → `{steam, unlockAll}` ·
 `GET /api/games/{id}?token&v` → state or 204 · `GET /api/games/{id}/moves?token&from` → legal moves ·
 `POST /api/games/{id}/move` `{token,from,to}` → state · `POST /api/games/{id}/roll` ·
-`POST /api/games/{id}/resign` · `GET /api/catalog` · `POST /api/profile` `{name, country}` ·
+`POST /api/games/{id}/resign` · `GET /api/leaderboard?token` · `GET /api/catalog` ·
+`POST /api/profile` `{name, country}` ·
 `GET /api/profile?token` · `POST /api/profile/update` · `POST /api/profile/equip` ·
 `GET /api/auth/steam/login` · `GET /api/auth/steam/return` · `GET /healthz`.
 

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -121,14 +122,34 @@ func (s *Server) handleProfileEquip(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toProfilePayload(p))
 }
 
-// awardStats updates played/win counters when a game just finished. Only
-// signed-in players keep progress, and a win only counts in an online game
-// with more than one identity at the table.
-func (s *Server) awardStats(r *http.Request, rec *store.GameRecord) {
+// awardStats updates played/win counters when a game just finished.
+//
+// Three rules, and the middle one used to be wrong: it required two human
+// profiles at the table, so beating the computer never recorded a win.
+//
+//   - Only signed-in players keep progress (enforced again in the store,
+//     which ignores bumps for guests).
+//   - A win needs a genuine opponent — someone else's profile, or the
+//     computer. Beating the computer counts; sitting down against yourself in
+//     two tabs does not.
+//   - Offline games count for nothing. One person passing a mouse around is
+//     not a result, and the mode exists precisely so it does not have to be.
+//
+// Takes a context rather than a request because the computer finishes plenty
+// of games itself, and that path has no request to hand.
+func (s *Server) awardStats(ctx context.Context, rec *store.GameRecord) {
+	if rec.Mode != ModeOnline {
+		return
+	}
 	winnerProfile := ""
 	distinct := map[string]bool{}
+	bots := 0
 	for _, seat := range rec.Seats {
-		if seat.Profile == "" || seat.Bot {
+		if seat.Bot {
+			bots++
+			continue
+		}
+		if seat.Profile == "" {
 			continue
 		}
 		distinct[seat.Profile] = true
@@ -136,10 +157,11 @@ func (s *Server) awardStats(r *http.Request, rec *store.GameRecord) {
 			winnerProfile = seat.Profile
 		}
 	}
-	realMatch := rec.Mode == "online" && len(distinct) > 1
+	// Someone actually had to be on the other side of the board.
+	contested := len(distinct) > 1 || bots > 0
 	for pid := range distinct {
-		win := realMatch && pid == winnerProfile
-		if err := s.st.BumpProfileStats(r.Context(), pid, win); err != nil {
+		win := contested && pid == winnerProfile
+		if err := s.st.BumpProfileStats(ctx, pid, win); err != nil {
 			logf("game %s: stats update for profile %s failed: %v", rec.ID, pid, err)
 		}
 	}

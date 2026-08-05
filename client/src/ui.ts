@@ -1,4 +1,4 @@
-import type { CatalogItem, GameState, Lobby, Profile, RunningTable } from "./api";
+import type { CatalogItem, GameState, Lobby, Profile, RankEntry, RunningTable, Standings } from "./api";
 import type { Credit } from "./credits";
 import { ASSET_CREDITS, creditLine } from "./credits";
 import { countryList, countryName, flagChip } from "./flags";
@@ -39,7 +39,8 @@ export interface UiHandlers {
   refresh(): void;
   joinTable(gameId: string, password: string): void;
   createTable(opts: TableOptions): void;
-  practice(players: number): void;
+  offline(players: number): void;
+  leaderboard(): void;
   startEarly(): void;
   resume(): void;
   leave(): void;
@@ -74,6 +75,8 @@ export class Ui {
   // "all" by default: landing on the full room is the point of a browser, and
   // the open tables sort to the top anyway.
   private filter: "open" | "running" | "all" = "all";
+  /** True while the create card is being used to set up an offline game. */
+  private offlineSetup = false;
   private sortKey: "name" | "players" | "age" = "players";
   private sortDesc = false;
 
@@ -103,7 +106,9 @@ export class Ui {
       this.pendingJoin = "";
       $("joinpass").classList.add("hidden");
     };
-    $("btn-practice").onclick = () => h.practice(2);
+    $("btn-offline").onclick = () => this.showOfflineSetup();
+    $("btn-leaderboard").onclick = () => h.leaderboard();
+    $("btn-close-board").onclick = () => this.showMenu(this.canResume);
     $("btn-start").onclick = () => h.startEarly();
     $("btn-resume").onclick = () => h.resume();
     $("btn-cancel").onclick = () => h.leave();
@@ -197,6 +202,10 @@ export class Ui {
   }
 
   private submitTable(): void {
+    if (this.offlineSetup) {
+      this.h.offline(this.players);
+      return;
+    }
     this.h.createTable({
       name: $<HTMLInputElement>("table-name").value.trim(),
       players: this.players,
@@ -313,7 +322,10 @@ export class Ui {
   // ---- screens ----
 
   private hideAll(): void {
-    for (const id of ["signin", "menu", "browser", "create", "joinpass", "lobby", "result", "collection"]) {
+    for (const id of [
+      "signin", "menu", "browser", "create", "joinpass", "lobby", "result",
+      "collection", "leaderboard",
+    ]) {
       $(id).classList.add("hidden");
     }
   }
@@ -344,12 +356,73 @@ export class Ui {
     return !$("browser").classList.contains("hidden");
   }
 
+  /**
+   * The hall of champions. Below the threshold you are simply absent — not
+   * ranked low, not greyed out — which is what makes arriving on it mean
+   * something. So an unqualified player gets told the distance instead.
+   */
+  showStandings(board: Standings): void {
+    this.hideAll();
+    $("leaderboard").classList.remove("hidden");
+    document.body.classList.add("hud-hidden");
+
+    const note = $("board-note");
+    if (board.winsNeeded > 0) {
+      note.textContent =
+        board.winsNeeded === 1
+          ? `${board.minWins} victories earn a place. One more and you are on it.`
+          : `${board.minWins} victories earn a place — ${board.winsNeeded} to go.`;
+    } else if (board.you?.rank) {
+      note.textContent = `You stand at number ${board.you.rank}.`;
+    } else if (this.profile && !this.profile.persistent) {
+      note.textContent = `${board.minWins} victories earn a place. Sign in through Steam to be counted.`;
+    } else {
+      note.textContent = `${board.minWins} victories earn a place.`;
+    }
+
+    const body = $("board-rows");
+    body.replaceChildren();
+    for (const e of board.entries) body.appendChild(rankRow(e));
+    if (!board.entries.length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 4;
+      td.className = "empty";
+      td.textContent = "Nobody has reached it yet. The first place is open.";
+      tr.appendChild(td);
+      body.appendChild(tr);
+    }
+  }
+
   private showCreate(): void {
+    this.offlineSetup = false;
     this.hideAll();
     $("create").classList.remove("hidden");
+    $("create-title").textContent = "Open a table";
+    $("create-note").classList.add("hidden");
+    $("row-table-name").classList.remove("hidden");
+    $("row-table-pass").classList.remove("hidden");
+    $("btn-open-table").textContent = "Open the table";
     const name = $<HTMLInputElement>("table-name");
     if (!name.value) name.placeholder = `${this.profile?.name ?? "Your"}'s table`;
     $<HTMLInputElement>("table-pass").value = "";
+  }
+
+  /**
+   * Offline reuses the same card: the only thing a shared-screen game needs is
+   * how many people are round it. No name, no password, nobody to invite.
+   */
+  private showOfflineSetup(): void {
+    this.showCreate();
+    this.offlineSetup = true;
+    $("create-title").textContent = "Offline game";
+    const note = $("create-note");
+    note.textContent =
+      "Everyone plays on this screen, taking turns. Nothing is recorded — no victories, no unlocks.";
+    note.classList.remove("hidden");
+    $("row-table-name").classList.add("hidden");
+    $("row-table-pass").classList.add("hidden");
+    $("btn-open-table").textContent = "Set up the board";
   }
 
   /**
@@ -572,7 +645,7 @@ export class Ui {
     }
     $("seat").textContent =
       state.you === "all"
-        ? `Practice — you run all ${state.players} seats`
+        ? `Offline — all ${state.players} seats on this screen`
         : `You are ${seatName(state.you as never)}`;
     $("gamecode").textContent = state.mode === "online" ? state.name : "";
     ($("btn-resign") as HTMLButtonElement).disabled = state.status !== "active";
@@ -601,6 +674,15 @@ export class Ui {
       dot.className = "dot";
       dot.style.background = info.css;
       row.append(dot);
+      // A signed-in player's Steam avatar, where they have one.
+      if (seat.taken && seat.avatar) {
+        const img = document.createElement("img");
+        img.className = "face";
+        img.src = seat.avatar;
+        img.alt = "";
+        img.onerror = () => img.remove(); // a dead avatar URL must not leave a gap
+        row.append(img);
+      }
       if (seat.taken && seat.country) row.append(flagChip(seat.country));
 
       const who = document.createElement("div");
@@ -779,6 +861,51 @@ function runningRow(r: RunningTable): HTMLElement {
   act.appendChild(tag);
 
   row.append(name, seats, when, act);
+  return row;
+}
+
+/** One line of the hall of champions. */
+function rankRow(e: RankEntry): HTMLElement {
+  const row = document.createElement("tr");
+  if (e.you) row.classList.add("mine");
+
+  const rank = document.createElement("td");
+  rank.className = "num seats";
+  rank.textContent = String(e.rank ?? "");
+
+  const who = document.createElement("td");
+  const box = document.createElement("div");
+  box.className = "tname";
+  if (e.avatar) {
+    const img = document.createElement("img");
+    img.className = "face";
+    img.src = e.avatar;
+    img.alt = "";
+    img.onerror = () => img.remove();
+    box.appendChild(img);
+  }
+  if (e.country) box.appendChild(flagChip(e.country));
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = e.name || "A player";
+  box.appendChild(name);
+  if (e.you) {
+    const tag = document.createElement("span");
+    tag.className = "host";
+    tag.textContent = "you";
+    box.appendChild(tag);
+  }
+  who.appendChild(box);
+
+  const wins = document.createElement("td");
+  wins.className = "num seats";
+  wins.textContent = String(e.wins);
+
+  const played = document.createElement("td");
+  played.className = "num when";
+  played.textContent = String(e.played);
+
+  row.append(rank, who, wins, played);
   return row;
 }
 

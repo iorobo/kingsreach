@@ -21,19 +21,37 @@ export const C = {
   goldPale: Color3.FromHexString("#F3D27A"),
   node: Color3.FromHexString("#49555C"),
   hint: Color3.FromHexString("#7FD4C9"),
+  // Strikes get their own colour. A capture is a different kind of move and
+  // should not look like an empty field you happen to be able to reach.
+  strike: Color3.FromHexString("#E05A45"),
 };
 
 export function mat(
   scene: Scene,
   name: string,
   diffuse: Color3,
-  opts: { emissive?: Color3; specular?: Color3; alpha?: number; roughness?: number } = {},
+  opts: {
+    emissive?: Color3;
+    specular?: Color3;
+    alpha?: number;
+    roughness?: number;
+    /**
+     * Ignore the scene lights and render the flat colour. Interface markers
+     * want this: a lit surface blows out to white where the light hits it,
+     * which is fine for a stone and useless for a warning.
+     */
+    unlit?: boolean;
+  } = {},
 ): StandardMaterial {
   const m = new StandardMaterial(name, scene);
   m.diffuseColor = diffuse;
   m.emissiveColor = opts.emissive ?? Color3.Black();
   m.specularColor = opts.specular ?? new Color3(0.12, 0.12, 0.12);
   m.specularPower = opts.roughness !== undefined ? 1 + (1 - opts.roughness) * 120 : 24;
+  if (opts.unlit) {
+    m.disableLighting = true;
+    m.specularColor = Color3.Black();
+  }
   if (opts.alpha !== undefined) {
     m.alpha = opts.alpha;
     m.backFaceCulling = false;
@@ -89,6 +107,30 @@ export function disc(
   const m = MeshBuilder.CreateCylinder(name, { diameter: radius * 2, height, tessellation: 40 }, scene);
   m.material = material;
   if (parent) m.parent = parent;
+  return m;
+}
+
+// Flat annulus lying in the XZ plane. Used to encircle a stone rather than
+// cover it: a strike marker has to sit *around* the piece being taken, or the
+// player cannot see what they are about to capture.
+export function ring(
+  scene: Scene,
+  name: string,
+  innerRadius: number,
+  outerRadius: number,
+  material: StandardMaterial,
+): Mesh {
+  const m = MeshBuilder.CreateTorus(
+    name,
+    {
+      diameter: innerRadius + outerRadius,
+      thickness: outerRadius - innerRadius,
+      tessellation: 44,
+    },
+    scene,
+  );
+  m.scaling.y = 0.5; // flatten it onto the board
+  m.material = material;
   return m;
 }
 

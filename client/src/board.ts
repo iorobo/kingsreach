@@ -1,6 +1,6 @@
 import { MeshBuilder, TransformNode, Vector3 } from "./babylon";
-import type { Mesh, Scene } from "./babylon";
-import { C, disc, hexPrism, mat } from "./theme";
+import type { GlowLayer, Mesh, Scene } from "./babylon";
+import { C, disc, hexPrism, mat, ring } from "./theme";
 import { PIECE_H, buildPiece } from "./skins";
 import { seatInfo } from "./seats";
 import type { BoardDto, GameState, MoveOption, PieceDto, Seat } from "./api";
@@ -124,6 +124,9 @@ export class BoardView {
   private readonly nodePos = new Map<string, Vector3>();
   private readonly pieces = new Map<string, PieceView>();
   private readonly hints = new Map<string, Mesh>();
+  private readonly captureNodes = new Set<string>();
+  /** Set by the app so strike markers can opt out of the bloom. */
+  glow: GlowLayer | null = null;
   private trail: Mesh[] = [];
   private selectionRing: Mesh | null = null;
   private staticRoot: TransformNode | null = null;
@@ -426,19 +429,36 @@ export class BoardView {
   showHints(options: MoveOption[]): void {
     this.clearHints();
     const base = mat(this.scene, "hint", C.hint, { emissive: C.hint.scale(0.75), alpha: 0.85 });
+    // A strike reads as a threat, not an invitation: red, and a wide ring that
+    // encircles the stone about to be taken rather than hiding under it.
+    const strike = mat(this.scene, "strike", C.strike, { emissive: C.strike, unlit: true });
     for (const o of options) {
       if (!this.nodePos.has(o.to)) continue;
       const p = this.nodeWorld(o.to);
-      const d = disc(this.scene, "hint", 0.24, 0.024, base);
-      d.position.set(p.x, 0.03, p.z);
-      d.metadata = { hintNode: o.to };
+      const capture = !!o.captures;
+      const d = capture
+        ? ring(this.scene, "strike", 0.29, 0.43, strike)
+        : disc(this.scene, "hint", 0.24, 0.024, base);
+      d.position.set(p.x, capture ? 0.055 : 0.03, p.z);
+      d.metadata = { hintNode: o.to, capture };
+      // The bloom washes strong colours out to white, which is exactly what a
+      // warning marker must not be. Empty fields keep their glow; strikes are
+      // excluded so the red actually reads as red.
+      if (capture) this.glow?.addExcludedMesh(d);
       this.hints.set(o.to, d);
+      if (capture) this.captureNodes.add(o.to);
     }
+  }
+
+  /** Is this field a strike? Used to colour the emphasis while dragging. */
+  isCapture(node: string): boolean {
+    return this.captureNodes.has(node);
   }
 
   clearHints(): void {
     for (const m of this.hints.values()) m.dispose();
     this.hints.clear();
+    this.captureNodes.clear();
   }
 
   /** Swells the destination the held stone is hovering over. */
@@ -454,10 +474,14 @@ export class BoardView {
     if (!this.hints.size && !this.selectionRing?.isEnabled()) return;
     this.pulse += this.scene.getEngine().getDeltaTime() / 1000;
     const k = 0.65 + 0.35 * Math.sin(this.pulse * 4.4);
-    for (const mesh of this.hints.values()) {
+    for (const [id, mesh] of this.hints) {
+      const capture = this.captureNodes.has(id);
       const m = mesh.material as ReturnType<typeof mat>;
-      m.emissiveColor = C.hint.scale(0.45 + 0.5 * k);
-      mesh.position.y = 0.03 + k * 0.012;
+      // Unlit strikes carry their colour in the emissive alone, so keep them
+      // near full brightness or the pulse dims them into the board.
+      m.emissiveColor = capture ? C.strike.scale(0.8 + 0.2 * k) : C.hint.scale(0.45 + 0.5 * k);
+      // Strike rings ride a little higher so they clear the stone they circle.
+      mesh.position.y = (capture ? 0.055 : 0.03) + k * 0.012;
     }
     if (this.selectionRing?.isEnabled()) this.selectionRing.rotation.y += 0.012;
   }

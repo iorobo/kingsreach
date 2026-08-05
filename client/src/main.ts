@@ -75,6 +75,7 @@ class Kingsreach {
     glow.intensity = 0.55;
 
     this.board = new BoardView(this.scene);
+    this.board.glow = glow;
     this.board.onMeshes = (meshes) => this.registerCasters(meshes);
 
     this.diceRoller = new DiceRoller(this.scene);
@@ -86,7 +87,8 @@ class Kingsreach {
       refresh: () => void this.refreshLobbies(),
       joinTable: (id, password) => void this.joinGame(id, password),
       createTable: (opts) => void this.createTable(opts),
-      practice: (players) => void this.createGame({ mode: "practice", players }),
+      offline: (players) => void this.createGame({ mode: "offline", players }),
+      leaderboard: () => void this.showLeaderboard(),
       startEarly: () => void this.startEarly(),
       resume: () => void this.resume(),
       leave: () => this.leaveToMenu(),
@@ -283,6 +285,14 @@ class Kingsreach {
 
   // ---- the board room ----
 
+  private async showLeaderboard(): Promise<void> {
+    try {
+      this.ui.showStandings(await api.leaderboard(this.profileToken));
+    } catch (e) {
+      this.ui.toast(errText(e));
+    }
+  }
+
   private async openBrowser(): Promise<void> {
     this.ui.showBrowser();
     await this.refreshLobbies();
@@ -315,7 +325,7 @@ class Kingsreach {
   }
 
   private async createGame(opts: {
-    mode: "online" | "practice";
+    mode: "online" | "offline";
     players: number;
     name?: string;
     password?: string;
@@ -553,7 +563,7 @@ class Kingsreach {
 
   private resultTitle(state: GameState): string {
     if (!state.winner) return "A weary peace";
-    if (state.you === "all" || state.mode === "practice") return `${seatName(state.winner)} is victorious`;
+    if (state.you === "all" || state.mode === "offline") return `${seatName(state.winner)} is victorious`;
     return state.winner === state.you ? "Victory is yours" : `${seatName(state.winner)} is victorious`;
   }
 
@@ -666,6 +676,18 @@ class Kingsreach {
     if (meta?.hintNode && this.selected) {
       void this.commitMove(this.selected, meta.hintNode, false);
       return;
+    }
+
+    // Tapping the stone you can take is the same thing. The enemy piece sits
+    // on top of its own strike ring, so the pick lands on the piece and never
+    // reaches the marker underneath — without this, a capture could only be
+    // made by dragging.
+    if (meta?.pieceId && this.selected) {
+      const target = this.board.pieceById(meta.pieceId);
+      if (target && this.options.some((o) => o.to === target.node)) {
+        void this.commitMove(this.selected, target.node, false);
+        return;
+      }
     }
 
     if (meta?.pieceId && this.myTurn()) {
