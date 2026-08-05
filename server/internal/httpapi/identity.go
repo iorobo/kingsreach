@@ -133,7 +133,36 @@ func (s *Server) handleProfileGet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "unknown profile")
 		return
 	}
+	s.fillMissingCountry(r, p)
 	writeJSON(w, http.StatusOK, toProfilePayload(p))
+}
+
+// fillMissingCountry gives a flag to a profile that has none. Sign-in is not
+// the only chance to get this right: a player may have signed in before the
+// server could place addresses, or from behind a proxy that was not yet
+// passing the real one through, and nothing else would ever fix that. Only
+// ever fills a blank — a country the player chose is theirs.
+func (s *Server) fillMissingCountry(r *http.Request, p *store.Profile) {
+	if p == nil || p.Country != "" {
+		return
+	}
+	c := s.guessCountry(r)
+	if c == "" {
+		return
+	}
+	p.Country = c
+	if err := s.st.UpdateProfileIdentity(r.Context(), p); err != nil {
+		logf("could not save the guessed country for %s: %v", p.ID, err)
+		return
+	}
+	logf("profile %s had no country; placed it in %s", p.ID, c)
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "no country"
+	}
+	return s
 }
 
 // handleProfileUpdate lets a player change their display name or country.
@@ -217,13 +246,26 @@ func (s *Server) handleSteamReturn(w http.ResponseWriter, r *http.Request) {
 		logf("steam player %s signed in for the first time (%s)", steamID, prof.Name)
 	} else {
 		// Refresh the name and avatar; people rename themselves.
+		changed := false
 		if name, avatar, serr := s.steam.Summary(r.Context(), steamID); serr == nil && name != "" {
 			prof.Name, prof.Avatar = cleanName(name), avatar
+			changed = true
+		}
+		// A profile made before we could place addresses — or before the proxy
+		// was passing the real one through — has no country at all, and nothing
+		// would ever have given it one.
+		if prof.Country == "" {
+			if c := s.guessCountry(r); c != "" {
+				prof.Country = c
+				changed = true
+			}
+		}
+		if changed {
 			if err := s.st.UpdateProfileIdentity(r.Context(), prof); err != nil {
 				logf("steam profile refresh failed: %v", err)
 			}
 		}
-		logf("steam player %s signed in (%s)", steamID, prof.Name)
+		logf("steam player %s signed in (%s, %s)", steamID, prof.Name, orNone(prof.Country))
 	}
 	http.Redirect(w, r, "/#steam="+prof.Token, http.StatusFound)
 }

@@ -130,8 +130,8 @@ a guest; their games work exactly the same, but nothing is saved, so unlockables
 
 ## Country flags
 
-The flag next to your name is a guess from your address, shown in the picker so you can correct
-it before it sticks. It works out of the box and **no player address ever leaves the server**: a
+The flag next to your name is a guess from your address. Click it on the menu to change it, or
+click *set your flag* if there is none. It works out of the box and **no player address ever leaves the server**: a
 2.1 MB IPv4→country table is compiled into the binary. Behind a CDN the `CF-IPCountry` header is
 used instead, which is both cheaper and the only thing that covers IPv6.
 

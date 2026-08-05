@@ -87,6 +87,11 @@
   .me { display: flex; align-items: center; justify-content: center; gap: 9px; margin-bottom: 6px; }
   .me img { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); object-fit: cover; }
   .me .nick { font-size: 19px; color: var(--gold-pale); }
+  .me .setflag {
+    background: none; border: 1px dashed #6b6258; color: #8d8377;
+    font-size: 11px; padding: 3px 8px; border-radius: 6px; font-family: inherit;
+  }
+  .me .flag { cursor: pointer; }
   #btn-switch { background: none; border: none; color: #8d8377; font-size: 12px; padding: 2px 6px; text-decoration: underline; }
 
   #topbar, #bottombar {
@@ -379,6 +384,18 @@
       <div id="lobbyseats"></div>
       <button class="primary wide" id="btn-start">Start now — the computer takes the empty seats</button>
       <button class="ghost wide" id="btn-cancel">Cancel</button>
+    </div>
+  </div>
+
+  <div id="flagpicker" class="overlay hidden">
+    <div class="card">
+      <h1 style="font-size:26px">Your flag</h1>
+      <div class="hint">Shown beside your name at the table. Guessed from where you connect from — change it if that is wrong.</div>
+      <div class="row">
+        <select id="my-country" aria-label="Country"></select>
+      </div>
+      <button class="primary wide" id="btn-save-flag">Save</button>
+      <button class="ghost wide" id="btn-cancel-flag">Back</button>
     </div>
   </div>
 

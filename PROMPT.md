@@ -343,6 +343,14 @@ alongside the artwork.
 A caution for tests: a geo database answers about *registration*, not about who operates an
 address. `1.1.1.1` is Cloudflare's resolver and resolves to **AU**, because APNIC holds the block.
 
+**A guess is not a one-shot.** Sign-in used to be the only moment a country could be set, so a
+profile created before the server could place addresses — or from behind a proxy that was not yet
+forwarding the real one — kept no flag for ever, and nothing would have fixed it. `fillMissingCountry`
+now fills a *blank* on any profile fetch, and never overwrites one that is already there, because
+by then it may be a choice. The player also has the last word: the flag on the menu opens a picker
+(`#flagpicker`), which is the only way a signed-in player could reach one — they never pass the
+guest sign-in screen where it used to live.
+
 ### 3.5 The lobby browser — "Populated browser"
 
 `GET /api/lobbies` returns two lists:

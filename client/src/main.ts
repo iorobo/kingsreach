@@ -83,6 +83,7 @@ class Kingsreach {
       steamLogin: () => this.steamLogin(),
       guest: (name, country) => void this.signInAsGuest(name, country),
       switchPlayer: () => this.signOut(),
+      setCountry: (code) => void this.setCountry(code),
       browse: () => void this.openBrowser(),
       refresh: () => void this.refreshLobbies(),
       joinTable: (id, password) => void this.joinGame(id, password),
@@ -192,6 +193,21 @@ class Kingsreach {
       this.ui.setData(this.profile, this.catalog);
       this.applyEnvironment(this.profile.equippedEnv);
       this.ui.showMenu(await this.checkResumable());
+    } catch (e) {
+      this.ui.toast(errText(e));
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async setCountry(code: string): Promise<void> {
+    const p = this.profile;
+    if (!p || this.busy) return;
+    this.busy = true;
+    try {
+      this.profile = await api.updateProfile(p.token, p.name, code);
+      this.ui.setData(this.profile, this.catalog);
+      this.ui.toast(code ? "Your flag is set." : "Flag cleared.", true);
     } catch (e) {
       this.ui.toast(errText(e));
     } finally {

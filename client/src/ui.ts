@@ -35,6 +35,7 @@ export interface UiHandlers {
   steamLogin(): void;
   guest(name: string, country: string): void;
   switchPlayer(): void;
+  setCountry(code: string): void;
   browse(): void;
   refresh(): void;
   joinTable(gameId: string, password: string): void;
@@ -117,6 +118,11 @@ export class Ui {
     $("btn-focus").onclick = () => h.focus();
     $("btn-throw").onclick = () => h.throwDie();
     $("btn-resign").onclick = () => this.onResign();
+    $("btn-cancel-flag").onclick = () => $("flagpicker").classList.add("hidden");
+    $("btn-save-flag").onclick = () => {
+      $("flagpicker").classList.add("hidden");
+      h.setCountry($<HTMLSelectElement>("my-country").value);
+    };
     $("btn-music").onclick = () => h.toggleMusic();
     $("btn-collection").onclick = () => this.showCollection();
     $("btn-close-collection").onclick = () => $("collection").classList.add("hidden");
@@ -174,10 +180,11 @@ export class Ui {
   }
 
   private fillCountries(): void {
-    const select = $<HTMLSelectElement>("guest-country");
-    const none = new Option("Country…", "");
-    select.add(none);
-    for (const c of countryList()) select.add(new Option(c.name, c.code));
+    for (const id of ["guest-country", "my-country"]) {
+      const select = $<HTMLSelectElement>(id);
+      select.add(new Option("Country…", ""));
+      for (const c of countryList()) select.add(new Option(c.name, c.code));
+    }
   }
 
   /**
@@ -316,7 +323,27 @@ export class Ui {
     nick.className = "nick";
     nick.textContent = p.name || "Wanderer";
     host.appendChild(nick);
-    if (p.country) host.appendChild(flagChip(p.country));
+
+    // The flag is a guess, so it has to be correctable — and a signed-in
+    // player never passes the sign-in screen where the picker used to live.
+    if (p.country) {
+      const chip = flagChip(p.country);
+      chip.title = `${countryName(p.country)} — click to change`;
+      chip.onclick = () => this.showFlagPicker();
+      host.appendChild(chip);
+    } else {
+      const set = document.createElement("button");
+      set.className = "setflag";
+      set.textContent = "set your flag";
+      set.onclick = () => this.showFlagPicker();
+      host.appendChild(set);
+    }
+  }
+
+  private showFlagPicker(): void {
+    const select = $<HTMLSelectElement>("my-country");
+    select.value = this.profile?.country ?? "";
+    $("flagpicker").classList.remove("hidden");
   }
 
   // ---- screens ----
@@ -324,7 +351,7 @@ export class Ui {
   private hideAll(): void {
     for (const id of [
       "signin", "menu", "browser", "create", "joinpass", "lobby", "result",
-      "collection", "leaderboard",
+      "collection", "leaderboard", "flagpicker",
     ]) {
       $(id).classList.add("hidden");
     }

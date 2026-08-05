@@ -1,10 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"kingsreach/internal/store"
 )
 
 func TestCountryFromProxyHeader(t *testing.T) {
@@ -49,6 +52,72 @@ func TestLoopbackYieldsNoCountry(t *testing.T) {
 	}
 	if data["country"] != "" {
 		t.Fatalf("loopback should place nobody, got %v", data["country"])
+	}
+}
+
+// A profile made before the server could place addresses has no flag, and
+// signing in again used to leave it that way for ever.
+func TestProfileWithoutACountryGetsOne(t *testing.T) {
+	ts := testServer(t)
+	srv := ts.Config.Handler.(*Server)
+	p := &store.Profile{
+		ID: "no-flag", Token: "t-no-flag", Kind: KindSteam, SteamID: "76561190000000020",
+		Name: "Flagless", EquippedSkin: DefaultSkin, EquippedEnv: DefaultEnv,
+	}
+	if err := srv.st.CreateProfile(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fetching the profile from a placeable address fills the blank in…
+	req, _ := http.NewRequest("GET", ts.URL+"/api/profile?token=t-no-flag", nil)
+	req.Header.Set("CF-IPCountry", "SE")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+
+	_, after := request(t, "GET", ts.URL+"/api/profile?token=t-no-flag", nil)
+	if after["country"] != "SE" {
+		t.Fatalf("a profile with no country should have been placed: %v", after["country"])
+	}
+
+	// …and a later request from somewhere else must not overwrite it, because
+	// by then it may be a choice rather than a guess.
+	req, _ = http.NewRequest("GET", ts.URL+"/api/profile?token=t-no-flag", nil)
+	req.Header.Set("CF-IPCountry", "JP")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	_, again := request(t, "GET", ts.URL+"/api/profile?token=t-no-flag", nil)
+	if again["country"] != "SE" {
+		t.Fatalf("an existing country must not be overwritten, got %v", again["country"])
+	}
+}
+
+// Whatever the guess says, the player has the last word.
+func TestPlayerCanSetTheirOwnFlag(t *testing.T) {
+	ts := testServer(t)
+	tok := signedIn(t, ts, "76561190000000021", "Picky")
+
+	code, p := request(t, "POST", ts.URL+"/api/profile/update",
+		map[string]string{"token": tok, "country": "pt"})
+	if code != 200 || p["country"] != "PT" {
+		t.Fatalf("setting a country: %d %v", code, p)
+	}
+	// A Steam display name still comes from Steam.
+	_, p2 := request(t, "POST", ts.URL+"/api/profile/update",
+		map[string]string{"token": tok, "name": "Somebody Else", "country": "PT"})
+	if p2["name"] != "Picky" {
+		t.Fatalf("a Steam name must not be editable here, got %v", p2["name"])
+	}
+	// And it can be cleared again.
+	_, p3 := request(t, "POST", ts.URL+"/api/profile/update",
+		map[string]string{"token": tok, "country": ""})
+	if p3["country"] != "" {
+		t.Fatalf("clearing the flag: %v", p3["country"])
 	}
 }
 
