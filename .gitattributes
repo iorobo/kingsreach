@@ -13,3 +13,4 @@
 *.glb binary
 *.mp3 binary
 *.gz  binary
+*.bin binary

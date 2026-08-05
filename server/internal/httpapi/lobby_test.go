@@ -113,6 +113,40 @@ func TestJoinLobbyAndPlayTheComputer(t *testing.T) {
 	}
 }
 
+// Your own table is marked, so the browser can offer "Return" rather than a
+// join that would (rightly) be refused.
+func TestYourOwnTableIsMarked(t *testing.T) {
+	ts := testServer(t)
+	tok := signedIn(t, ts, "76561190000000013", "Host")
+
+	_, g := request(t, "POST", ts.URL+"/api/games",
+		map[string]any{"mode": "online", "players": 2, "profile": tok, "name": "mine"})
+	id := g["gameId"].(string)
+
+	_, mine := request(t, "GET", ts.URL+"/api/lobbies?token="+tok, nil)
+	found := false
+	for _, l := range lobbiesOf(mine, "lobbies") {
+		if l["gameId"] == id {
+			found = true
+			if l["yours"] != true {
+				t.Fatalf("the host's own table should be marked: %v", l)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the table is missing from the browser")
+	}
+
+	// To everyone else it is just a table.
+	other := signedIn(t, ts, "76561190000000014", "Stranger")
+	_, theirs := request(t, "GET", ts.URL+"/api/lobbies?token="+other, nil)
+	for _, l := range lobbiesOf(theirs, "lobbies") {
+		if l["gameId"] == id && l["yours"] == true {
+			t.Fatalf("somebody else's table was marked as theirs: %v", l)
+		}
+	}
+}
+
 func TestLockedLobbyNeedsThePassword(t *testing.T) {
 	ts := testServer(t)
 	_, g := request(t, "POST", ts.URL+"/api/games",

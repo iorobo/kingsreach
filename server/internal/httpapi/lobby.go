@@ -41,7 +41,14 @@ type runningEntry struct {
 func (s *Server) handleLobbies(w http.ResponseWriter, r *http.Request) {
 	s.seedLobbies(r.Context())
 
-	token := r.URL.Query().Get("token")
+	// The client sends its *profile* token here, not a seat token — those are
+	// different secrets, and comparing them meant "yours" never lit up.
+	myProfile := ""
+	if token := r.URL.Query().Get("token"); token != "" {
+		if p, err := s.st.GetProfileByToken(r.Context(), token); err == nil {
+			myProfile = p.ID
+		}
+	}
 	games, err := s.st.ListOpen(r.Context(), 40)
 	if err != nil {
 		logf("lobby list failed: %v", err)
@@ -55,7 +62,7 @@ func (s *Server) handleLobbies(w http.ResponseWriter, r *http.Request) {
 	// Hosts and names already on screen, so the running list never repeats one.
 	seenHost, seenName := map[string]bool{}, map[string]bool{}
 	for _, g := range games {
-		_, mine := g.SeatFor(token)
+		_, mine := g.SeatForProfile(myProfile)
 		taken := len(g.Seats) - g.FreeSeats()
 		out.Lobbies = append(out.Lobbies, lobbyEntry{
 			GameID: g.ID, Name: g.Name, Host: g.HostName, Country: g.HostCountry,

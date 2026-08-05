@@ -35,6 +35,15 @@ export const ASSET_CREDITS: Credit[] = [
     source: "Sketchfab",
     url: "https://sketchfab.com/3d-models/dice-3b955af797e140eca0947ede57f412ba",
   },
+  // Not artwork, but the same obligation: MaxMind's terms require this notice
+  // wherever the data is used. The flag next to a player's name comes from it.
+  {
+    title: "GeoLite2 Country data",
+    author: "MaxMind",
+    licence: "GeoLite2 EULA",
+    source: "maxmind.com",
+    url: "https://www.maxmind.com",
+  },
 ];
 
 /** One line of credit, as a link where we have one. */

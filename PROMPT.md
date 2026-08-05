@@ -313,20 +313,35 @@ Two ways in, chosen on the first screen:
 URL never even reaches Steam. Display names are stripped of control characters and capped at 24
 runes; countries must be a bare ISO-3166 alpha-2 code.
 
-**Country guess** (`geoip.go`). Two sources, in order:
+**Country guess** (`geoip.go`). Three sources, cheapest and most private first:
 
 1. A country header from whatever sits in front of us — `CF-IPCountry` and friends. Free, instant,
-   and nothing leaves the building. Cloudflare's `XX` (unknown) and `T1` (Tor) are not countries
-   and are ignored.
-2. `GEOIP_URL` (must contain `{ip}`), if set. This necessarily hands the player's address to a
-   third party, so it is **off unless configured**; results are cached per address for 12 hours,
-   misses included, so a dead service is asked once rather than on every visit. 2-second timeout.
+   nothing leaves the building, and the only source that also covers IPv6. Cloudflare's `XX`
+   (unknown) and `T1` (Tor) are not countries and are ignored.
+2. **A table compiled into the binary** (`internal/geoip`). No network, no third party, no rate
+   limit, ~37 ns per lookup. IPv4 only — that is the dataset's limit, not an oversight.
+3. `GEOIP_URL` (must contain `{ip}`), if set. This hands the player's address to a third party, so
+   it stays **off unless configured**, and now exists mainly to cover the IPv6 addresses step 2
+   cannot answer. Results are cached per address for 12 hours, misses included, so a dead service
+   is asked once rather than on every visit. 2-second timeout.
 
 Loopback, private, link-local and unparseable addresses are never looked up. `X-Forwarded-For` is
 only believed when `TRUST_PROXY` is set — anyone can send that header, and behind no proxy it is
 pure attacker input. The result **preselects the picker** on the sign-in screen; the player sees
 it and can change it before it reaches their profile. It also fills the country on a fresh Steam
 profile, since Steam's public profile carries no country without an API key.
+
+The table is built from [datasets/geoip2-ipv4](https://github.com/datasets/geoip2-ipv4), which
+refreshes weekly from MaxMind's GeoLite2 Country database. `cmd/geoipgen` reduces the 30 MB CSV to
+a 2.1 MB file: sorted *boundaries* rather than ranges (the end of one block is the start of the
+next), each six bytes — a `uint32` address and the country packed into a `uint16`. Runs of one
+country collapse; gaps get an explicit "nobody" marker so a lookup inside unallocated space cannot
+inherit the block before it. Refreshing is: download the CSV, `go run ./cmd/geoipgen`, commit the
+`.bin`. **MaxMind's terms require the credit**, which is why it sits in `client/src/credits.ts`
+alongside the artwork.
+
+A caution for tests: a geo database answers about *registration*, not about who operates an
+address. `1.1.1.1` is Cloudflare's resolver and resolves to **AU**, because APNIC holds the block.
 
 ### 3.5 The lobby browser — "Populated browser"
 

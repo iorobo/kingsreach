@@ -10,21 +10,26 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"kingsreach/internal/geoip"
 )
 
 // Guessing a player's country from their address, to preselect the flag in the
 // sign-in picker. It is a *suggestion*: the player sees it in the dropdown and
 // can change it before it ever reaches their profile.
 //
-// Two sources, in order:
+// Three sources, in order, cheapest and most private first:
 //
 //  1. A country header from whatever sits in front of us. Cloudflare, Fastly
-//     and friends already know, so this costs nothing and leaks nothing.
-//  2. A lookup service, if one is configured. This necessarily hands the
-//     player's IP to a third party, so it is opt-in through GEOIP_URL and the
-//     result is cached per address.
+//     and friends already know, so this costs nothing, leaks nothing, and is
+//     the only source that also covers IPv6.
+//  2. The table compiled into the binary (internal/geoip). No network, no
+//     third party, no rate limit — IPv4 only, which is the dataset's limit.
+//  3. A lookup service, if one is configured. This necessarily hands the
+//     player's IP to a third party, so it stays opt-in through GEOIP_URL and
+//     exists mainly to cover the IPv6 addresses step 2 cannot answer.
 //
-// Private, loopback and unparseable addresses are never looked up.
+// Private, loopback and unparseable addresses are never looked up at all.
 
 // Headers a reverse proxy or CDN may set. All carry a bare alpha-2 code.
 var countryHeaders = []string{
@@ -129,6 +134,11 @@ func (s *Server) guessCountry(r *http.Request) string {
 	ip := clientIP(r)
 	if !lookupable(ip) {
 		return ""
+	}
+	// The built-in table costs a binary search, so it is not worth caching and
+	// never goes stale mid-run.
+	if c := cleanCountry(geoip.Builtin().Lookup(ip)); c != "" {
+		return c
 	}
 	if c, ok := s.geo.get(ip); ok {
 		return c

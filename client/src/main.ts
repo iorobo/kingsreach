@@ -351,6 +351,16 @@ class Kingsreach {
     this.busy = true;
     this.stopLobbyPolling();
     try {
+      // A table you already sit at is one to walk back to, not to sit down at
+      // twice: use the seat token the server gave us rather than asking for
+      // another seat (which it now refuses anyway).
+      const savedId = localStorage.getItem(STORE.game);
+      const savedToken = localStorage.getItem(STORE.token);
+      if (savedId === gameId && savedToken) {
+        this.token = savedToken;
+        this.enterGame(await api.getGame(gameId, savedToken));
+        return;
+      }
       this.enterGame(await api.joinGame(gameId, password, this.profileToken));
     } catch (e) {
       const msg = errText(e);

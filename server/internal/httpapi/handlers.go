@@ -198,6 +198,20 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	// One identity, one seat. Two browser windows signed in to the same account
+	// could otherwise sit down opposite each other, which is not a game — and
+	// with a computer filling a third seat it hands out a guaranteed victory
+	// every time. The seat you already hold is still yours; use the token the
+	// server gave you then, rather than taking another.
+	if profileID != "" {
+		if seat, taken := rec.SeatForProfile(profileID); taken {
+			logf("game %s: profile %s tried to take a second seat (already at %s)", rec.ID, profileID, seat.Seat)
+			writeErr(w, http.StatusConflict, "you are already at this table")
+			return
+		}
+	}
+
 	for i := range rec.Seats {
 		if !rec.Seats[i].Taken {
 			rec.Seats[i].Taken = true

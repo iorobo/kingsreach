@@ -76,6 +76,20 @@ func (g *GameRecord) SeatFor(token string) (*Seat, bool) {
 	return nil, false
 }
 
+// SeatForProfile finds the seat an identity already holds, if any. Used to
+// keep one account from occupying two places at the same table.
+func (g *GameRecord) SeatForProfile(profileID string) (*Seat, bool) {
+	if profileID == "" {
+		return nil, false
+	}
+	for i := range g.Seats {
+		if g.Seats[i].Taken && g.Seats[i].Profile == profileID {
+			return &g.Seats[i], true
+		}
+	}
+	return nil, false
+}
+
 // HoldsEverySeat reports whether one token controls the whole table.
 func (g *GameRecord) HoldsEverySeat(token string) bool {
 	if token == "" {

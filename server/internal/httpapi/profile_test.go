@@ -160,6 +160,79 @@ func TestProfileProgressionAndEquip(t *testing.T) {
 	}
 }
 
+// Two browser windows on one account must not end up facing each other.
+func TestOneAccountCannotTakeTwoSeats(t *testing.T) {
+	ts := testServer(t)
+	tok := signedIn(t, ts, "76561190000000010", "Twofold")
+
+	_, g := request(t, "POST", ts.URL+"/api/games",
+		map[string]any{"mode": "online", "players": 4, "profile": tok, "name": "just me"})
+	id := g["gameId"].(string)
+
+	// The creator already holds a seat, so a second window is refused.
+	code, res := request(t, "POST", ts.URL+"/api/games/join",
+		map[string]string{"gameId": id, "profile": tok})
+	if code != 409 {
+		t.Fatalf("second seat for the same account = %d, want 409 (%v)", code, res)
+	}
+
+	// Somebody else still gets in.
+	other := signedIn(t, ts, "76561190000000011", "Rival")
+	code, res = request(t, "POST", ts.URL+"/api/games/join",
+		map[string]string{"gameId": id, "profile": other})
+	if code != 200 {
+		t.Fatalf("a different account should be welcome: %d %v", code, res)
+	}
+	// And is then refused a second seat too.
+	code, _ = request(t, "POST", ts.URL+"/api/games/join",
+		map[string]string{"gameId": id, "profile": other})
+	if code != 409 {
+		t.Fatalf("rival's second seat = %d, want 409", code)
+	}
+}
+
+// Even if a duplicate seat got in some other way, it wins nothing.
+func TestSelfPlayAwardsNoWin(t *testing.T) {
+	ts := testServer(t)
+	srv := ts.Config.Handler.(*Server)
+	tok := signedIn(t, ts, "76561190000000012", "Mirror")
+
+	_, g := request(t, "POST", ts.URL+"/api/games",
+		map[string]any{"mode": "online", "players": 3, "profile": tok, "name": "hall of mirrors"})
+	id, token := g["gameId"].(string), g["token"].(string)
+	// Start short-handed: the computer fills the rest, which would normally
+	// make this a contested game.
+	request(t, "POST", ts.URL+"/api/games/"+id+"/start", map[string]string{"token": token})
+
+	rec, err := srv.st.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Force the state the join check now prevents: the same identity twice.
+	me, _ := rec.SeatFor(token)
+	for i := range rec.Seats {
+		if rec.Seats[i].Seat != me.Seat {
+			rec.Seats[i].Bot = false
+			rec.Seats[i].Profile = me.Profile
+			break
+		}
+	}
+	rec.State.Status, rec.State.Winner, rec.State.WinReason = "finished", me.Seat, "throne"
+	rec.Status = "finished"
+	if err := srv.st.Update(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+	srv.awardStats(context.Background(), rec)
+
+	_, after := request(t, "GET", ts.URL+"/api/profile?token="+tok, nil)
+	if int(after["wins"].(float64)) != 0 {
+		t.Fatalf("beating yourself is not a victory: %v", after)
+	}
+	if int(after["gamesPlayed"].(float64)) != 1 {
+		t.Fatalf("the game still happened: played = %v, want 1", after["gamesPlayed"])
+	}
+}
+
 // Beating the computer is a win. This is the case that was silently dropped:
 // the old rule needed two human profiles at the table.
 func TestWinningAgainstTheComputerCounts(t *testing.T) {

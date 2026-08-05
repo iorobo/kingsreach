@@ -131,10 +131,21 @@ a guest; their games work exactly the same, but nothing is saved, so unlockables
 ## Country flags
 
 The flag next to your name is a guess from your address, shown in the picker so you can correct
-it before it sticks. Behind a CDN this costs nothing — Cloudflare and friends already send a
-`CF-IPCountry` header. Without one, set `GEOIP_URL` to a lookup service containing `{ip}`, e.g.
-`https://ipapi.co/{ip}/json/`; leave it unset and the guess is simply skipped, which is the right
-default since the lookup hands the player's address to a third party.
+it before it sticks. It works out of the box and **no player address ever leaves the server**: a
+2.1 MB IPv4→country table is compiled into the binary. Behind a CDN the `CF-IPCountry` header is
+used instead, which is both cheaper and the only thing that covers IPv6.
+
+Set `TRUST_PROXY=1` when something sits in front of the app, or every visitor looks like the
+proxy. Optionally set `GEOIP_URL` to a service containing `{ip}` (e.g. `https://ipapi.co/{ip}/json/`)
+to cover IPv6 addresses the built-in table cannot answer — that one *does* send the address to a
+third party, which is why it is off by default.
+
+To refresh the table: download `data/geoip2-ipv4.csv` from
+[datasets/geoip2-ipv4](https://github.com/datasets/geoip2-ipv4) (it updates weekly), then
+
+```bash
+go run ./cmd/geoipgen -in geoip2-ipv4.csv -out internal/geoip/ipv4-country.bin
+```
 
 ## Music
 
@@ -197,6 +208,7 @@ condition of use, not a nicety — so it is shown in the game's Collection scree
 | `client/static/models/de-dust2.glb` | [de_dust2 - CS map](https://sketchfab.com/3d-models/de-dust2-cs-map-056008d59eb849a29c0ab6884c0c3d87) | pancakesbassoondonut (Sketchfab) | CC BY 4.0 |
 | `client/static/models/dice.glb` | [Dice](https://sketchfab.com/3d-models/dice-3b955af797e140eca0947ede57f412ba) | tnRaro (Sketchfab) | CC BY 4.0 |
 | `client/static/audio/magic-escape-room.mp3` | Magic Escape Room | Kevin MacLeod (incompetech.com) | CC BY 4.0 |
+| `server/internal/geoip/ipv4-country.bin` | GeoLite2 Country data, via [datasets/geoip2-ipv4](https://github.com/datasets/geoip2-ipv4) | MaxMind | GeoLite2 EULA — credit required |
 
 One caveat on the map: the CC-BY licence is the uploader's, and covers the conversion work they
 did. The underlying *de_dust2* level and its textures are Valve Corporation's, and a third party

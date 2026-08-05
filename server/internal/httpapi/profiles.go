@@ -142,7 +142,7 @@ func (s *Server) awardStats(ctx context.Context, rec *store.GameRecord) {
 		return
 	}
 	winnerProfile := ""
-	distinct := map[string]bool{}
+	seatsPer := map[string]int{}
 	bots := 0
 	for _, seat := range rec.Seats {
 		if seat.Bot {
@@ -152,14 +152,23 @@ func (s *Server) awardStats(ctx context.Context, rec *store.GameRecord) {
 		if seat.Profile == "" {
 			continue
 		}
-		distinct[seat.Profile] = true
+		seatsPer[seat.Profile]++
 		if seat.Seat == rec.State.Winner {
 			winnerProfile = seat.Profile
 		}
 	}
 	// Someone actually had to be on the other side of the board.
-	contested := len(distinct) > 1 || bots > 0
-	for pid := range distinct {
+	contested := len(seatsPer) > 1 || bots > 0
+	// Joining is supposed to refuse a second seat for the same account, so this
+	// should never fire — but a win handed to someone playing themselves is
+	// exactly the result worth being paranoid about, and rows predating that
+	// check still exist.
+	if seatsPer[winnerProfile] > 1 {
+		logf("game %s: profile %s held %d seats; no win awarded",
+			rec.ID, winnerProfile, seatsPer[winnerProfile])
+		contested = false
+	}
+	for pid := range seatsPer {
 		win := contested && pid == winnerProfile
 		if err := s.st.BumpProfileStats(ctx, pid, win); err != nil {
 			logf("game %s: stats update for profile %s failed: %v", rec.ID, pid, err)
