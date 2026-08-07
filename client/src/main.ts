@@ -43,6 +43,8 @@ class Kingsreach {
   private boardDto: BoardDto | null = null;
   private clockTimer = 0;
   private rematchOffered = false;
+  /** True while watching somebody else's game: no seat, no interaction. */
+  private watching = false;
 
   private state: GameState | null = null;
   private gameId = "";
@@ -91,6 +93,7 @@ class Kingsreach {
       browse: () => void this.openBrowser(),
       refresh: () => void this.refreshLobbies(),
       joinTable: (id, password) => void this.joinGame(id, password),
+      watchTable: (id) => void this.watchGame(id),
       createTable: (opts) => void this.createTable(opts),
       offline: (players) => void this.createGame({ mode: "offline", players }),
       leaderboard: () => void this.showLeaderboard(),
@@ -437,6 +440,51 @@ class Kingsreach {
     }
   }
 
+  /**
+   * Watch a game somebody else is playing. There is no seat and no token, so
+   * every move endpoint keeps refusing us for the same reason it always did —
+   * a spectator is just somebody the game does not recognise.
+   */
+  private async watchGame(id: string): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.stopLobbyPolling();
+    try {
+      const st = await api.watchGame(id);
+      if (!st) throw new Error("that game is not being shown");
+      this.watching = true;
+      this.gameId = id;
+      this.token = "";
+      this.state = null;
+      this.deselect();
+      this.board.clear();
+      this.ui.showWatching();
+      await this.applyState(st, false);
+      this.focusCamera(true);
+      this.startWatchPolling();
+    } catch (e) {
+      this.ui.toast(errText(e));
+      if (this.ui.browsing()) this.startLobbyPolling();
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private startWatchPolling(): void {
+    this.stopPolling();
+    this.pollTimer = window.setInterval(() => {
+      void (async () => {
+        if (!this.gameId || this.animating) return;
+        try {
+          const st = await api.watchGame(this.gameId, this.state?.version ?? 0);
+          if (st) await this.applyState(st, true);
+        } catch (e) {
+          console.warn("watch poll failed:", e);
+        }
+      })();
+    }, POLL_MS);
+  }
+
   /** Begin a table that never filled up; the computer takes what is left. */
   private async startEarly(): Promise<void> {
     if (!this.gameId || this.busy) return;
@@ -473,6 +521,7 @@ class Kingsreach {
     if (state.token) this.token = state.token;
     this.gameId = state.gameId;
     this.rematchOffered = false;
+    this.watching = false;
     this.stopLobbyPolling();
     localStorage.setItem(STORE.game, this.gameId);
     localStorage.setItem(STORE.token, this.token);
@@ -492,6 +541,7 @@ class Kingsreach {
     clearInterval(this.clockTimer);
     this.clockTimer = 0;
     this.rematchOffered = false;
+    this.watching = false;
     this.state = null;
     this.gameId = "";
     this.token = "";
@@ -571,6 +621,11 @@ class Kingsreach {
     }
 
     if (hasPath(state.lastMove)) this.board.showTrail(state.lastMove.path);
+    if (this.watching) {
+      this.ui.updateWhileWatching(state);
+      if (state.status === "finished") this.stopPolling();
+      return;
+    }
     this.ui.updateFromState(state, this.myTurn());
     await this.syncDicePhase(state);
 

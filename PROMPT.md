@@ -205,6 +205,7 @@ web/                       ← build output (generated, git-ignored)
 | `GET /api/config` | – | `{"steam":bool,"unlockAll":bool}` — which sign-in routes this server offers |
 | `GET /api/geo` | – | `{"country":"NL"}` — the country guessed from the caller's address, `""` when unknown. Never an error |
 | `GET /api/leaderboard` | `?token=…` | `{minWins, entries:[…], you, winsNeeded}` — see §3.6 |
+| `GET /api/games/{id}/watch` | `?v=N` | the state with no seat (`you:""`), or `204` when version is still `N`. Online games only |
 | `GET /api/games/{id}` | `?token=…&v=N` | full state, or `204` if version still `N` |
 | `GET /api/games/{id}/moves` | `?token=…&from=nodeId` | `{moves:[{to, path:[…]}]}` legal moves for that piece |
 | `POST /api/games/{id}/move` | `{"token","from","to"}` | new state (or `409` + error for illegal moves) |
@@ -362,10 +363,12 @@ guest sign-in screen where it used to live.
   player-made ones (`house = true`), each hosted by a computer player. They are ordinary rows in
   `games`: anyone can join one, and the computer then plays the other side (`RunBots`, one action
   per 900 ms tick — throws first, then moves). A table nobody joins is swept after 30 minutes.
-- **`running`** — tables already under way: `{name, host, country, players, ply, minutes}`.
-  Real active online games first, then padded so the room never looks abandoned. **The padded
-  entries are presentation only**: never stored, never joinable, never counted anywhere. Their
-  seed is a 90-second time bucket, so the list stays put between polls instead of flickering.
+- **`running`** — tables already under way: `{gameId, name, host, country, players, ply, minutes, bots}`.
+  **Every one is a real game.** The list used to be padded with invented rows that looked the same
+  but had nothing behind them; the moment anyone wanted to *watch* one, the difference mattered.
+  Instead `seedExhibitions` keeps two to six genuine computer-versus-computer games running —
+  ordinary rows, ordinary engine, ordinary move history, just with nobody human at the table. They
+  are `Listed: false`, because they are already under way and are there to be watched, not joined.
 
 Practice games and games untouched for ten minutes are left out of `running`; games abandoned for
 six hours are deleted outright. No handle and no table name appears twice in one response —
@@ -434,7 +437,22 @@ Bots pause before moving (`clocks.go`), longer when a capture is on the table. T
 vars — see the README table — so a deployment can tune the feel without a rebuild, and tests set
 `0-0` rather than waiting on theatre.
 
-### 3.8 The move clock
+### 3.8 Watching
+
+A spectator is simply somebody with no seat. `GET .../watch` builds the state with an empty token,
+so `you` comes back `""` and every move endpoint keeps refusing them for the same reason it always
+did — no second, weaker path through the rules. Version-aware like the seated poll.
+
+One consequence, stated rather than left to be discovered: a game in progress can be watched by
+anyone who can see it in the board room, including while it is being played. For the computer's
+exhibition matches that is the point; between people it means somebody could watch over your
+shoulder from across the internet. `watch.go` is where to gate that if it ever matters. Offline
+games are refused outright — a shared screen belongs to the people round it.
+
+The client keeps the same board and drops the controls that need a seat (`body.watching`). A
+spectator with a Resign button is a bug report waiting to happen.
+
+### 3.9 The move clock
 
 150 seconds to roll or move, or you forfeit the seat. Enforced in the server tick rather than on
 request, or closing a laptop would stall the table indefinitely — note that tick used to skip games
@@ -450,7 +468,7 @@ player cannot see is a trap, and rendering from the deadline means a slow poll c
 numbers jump. Bots are exempt; so is offline, where arming it would show a countdown that nothing
 enforces.
 
-### 3.9 Engine invariants (unit-tested)
+### 3.10 Engine invariants (unit-tested)
 
 - Board: 55 nodes, 78 edges, exactly 6 gold edges, Throne degree 6, kings start at `±8,0`.
 - Exact-step DFS: a 2 can never "bounce" back to its start; blocked first steps ⇒ no moves.

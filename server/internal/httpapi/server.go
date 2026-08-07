@@ -57,7 +57,8 @@ type Server struct {
 	BotLobbies bool
 	seedMu     sync.Mutex
 	lastSeed   time.Time
-	seedTarget int
+	seedTarget int // open tables to keep waiting
+	showTarget int // computer-versus-computer games to keep running
 }
 
 func New(st store.Store, staticDir string) *Server {
@@ -89,6 +90,7 @@ func New(st store.Store, staticDir string) *Server {
 	s.mux.HandleFunc("GET /api/auth/steam/login", s.handleSteamLogin)
 	s.mux.HandleFunc("GET /api/auth/steam/return", s.handleSteamReturn)
 	s.mux.HandleFunc("GET /api/games/{id}", s.handleGetState)
+	s.mux.HandleFunc("GET /api/games/{id}/watch", s.handleWatch)
 	s.mux.HandleFunc("GET /api/games/{id}/moves", s.handleMoves)
 	s.mux.HandleFunc("POST /api/games/{id}/move", s.handleMove)
 	s.mux.HandleFunc("POST /api/games/{id}/roll", s.handleRoll)

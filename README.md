@@ -194,10 +194,15 @@ streams over range requests; if that matters for your bandwidth, re-encode it sm
 
 There are no join codes. A player opens a named table — two to four seats, optionally behind a
 password — and it appears in the **board room**: a scrollable list you can search by table, host
-or country, filter to open or in-progress games, and sort by name, seats or age. To keep the room
-from looking abandoned, the server keeps one to four tables of its own open, hosted by computer
-players that take their turns once someone sits down, and pads the "in progress" list. See
-PROMPT.md §3.5. Set `KINGSREACH_BOT_LOBBIES=0` to switch all of that off.
+or country, filter to open or in-progress games, and sort by name, seats or age.
+
+To keep the room from looking abandoned, the server keeps a couple of tables of its own open and
+runs a handful of **exhibition matches between its own computer players**. Those are real games —
+you can press *Watch* and follow one move by move, which is also the easiest way to see how the
+three difficulty levels actually play. Set `KINGSREACH_BOT_LOBBIES=0` to switch all of it off.
+
+Anything in progress can be watched, including games between people. A spectator holds no seat, so
+they can see the board and nothing else.
 
 Those computer players get generated gamertags (`FrostRaven`, `marijke92`, `fr05tr4v3n`) and name
 their tables **in their own language** — "iemand zin in een potje?", "wer traut sich",
@@ -212,10 +217,18 @@ by putting its code in `hostOrigins` and its phrases in `tableNamesByLang`, both
 → `{lobbies, running}` · `GET /api/board` → graph · `GET /api/config` → `{steam, unlockAll}` ·
 `GET /api/games/{id}?token&v` → state or 204 · `GET /api/games/{id}/moves?token&from` → legal moves ·
 `POST /api/games/{id}/move` `{token,from,to}` → state · `POST /api/games/{id}/roll` ·
-`POST /api/games/{id}/resign` · `GET /api/leaderboard?token` · `GET /api/catalog` ·
+`POST /api/games/{id}/resign` · `POST /api/games/{id}/rematch` · `GET /api/games/{id}/watch?v` ·
+`GET /api/leaderboard?token` · `GET /api/catalog` ·
 `POST /api/profile` `{name, country}` ·
 `GET /api/profile?token` · `POST /api/profile/update` · `POST /api/profile/equip` ·
 `GET /api/auth/steam/login` · `GET /api/auth/steam/return` · `GET /healthz`.
+
+## Changelog
+
+The version sits at the bottom of the menu; click it to see what changed. Entries live in
+`client/src/changelog.ts` — add a release at the top and the game reports that version. It is
+deliberately *not* generated from the git log: commit messages are written for whoever maintains
+the code, and a changelog is written for whoever plays the game.
 
 ## Repository layout
 

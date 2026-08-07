@@ -46,6 +46,25 @@ func TestLobbyBrowserIsNeverEmpty(t *testing.T) {
 	if len(running) == 0 {
 		t.Fatalf("the running list should not be empty")
 	}
+	// Every game in progress is a real one now, and can therefore be watched.
+	// The list used to be padded with entries that had no id behind them.
+	srv := ts.Config.Handler.(*Server)
+	for _, r := range running {
+		id, _ := r["gameId"].(string)
+		if id == "" {
+			t.Fatalf("a game in progress with no id — is the list still being padded? %v", r)
+		}
+		if _, err := srv.st.Get(context.Background(), id); err != nil {
+			t.Fatalf("game %s is listed but does not exist: %v", id, err)
+		}
+		code, st := request(t, "GET", ts.URL+"/api/games/"+id+"/watch", nil)
+		if code != 200 {
+			t.Fatalf("watching %s: %d %v", id, code, st)
+		}
+		if st["you"] != "" {
+			t.Fatalf("a watcher must hold no seat, got %v", st["you"])
+		}
+	}
 	// Nobody plays two games at once, and no two tables share a name — either
 	// would read as a generator rather than a room.
 	seenHost, seenName := map[string]bool{}, map[string]bool{}
@@ -204,6 +223,43 @@ func TestStartEarlyFillsWithComputer(t *testing.T) {
 		if seat["taken"] != true {
 			t.Fatalf("every seat should be filled after starting early: %v", seat)
 		}
+	}
+}
+
+// Watching gives you the board and nothing else — no seat means every move
+// endpoint keeps refusing you, which is the same check that always applied.
+func TestWatchingGrantsNoSeat(t *testing.T) {
+	ts := testServer(t)
+	_, res := request(t, "GET", ts.URL+"/api/lobbies", nil)
+	running := lobbiesOf(res, "running")
+	if len(running) == 0 {
+		t.Skip("nothing under way this run")
+	}
+	id := running[0]["gameId"].(string)
+
+	_, st := request(t, "GET", ts.URL+"/api/games/"+id+"/watch", nil)
+	if len(st["pieces"].([]any)) == 0 {
+		t.Fatalf("a watcher should see the board")
+	}
+	// No token, so nothing can be played.
+	code, _ := request(t, "POST", ts.URL+"/api/games/"+id+"/move",
+		map[string]string{"token": "", "from": "-4,0", "to": "-1,1"})
+	if code != 403 {
+		t.Fatalf("a watcher moving = %d, want 403", code)
+	}
+	code, _ = request(t, "POST", ts.URL+"/api/games/"+id+"/resign", map[string]string{"token": ""})
+	if code != 403 {
+		t.Fatalf("a watcher resigning = %d, want 403", code)
+	}
+}
+
+// A shared-screen game belongs to the people round that screen.
+func TestOfflineGamesCannotBeWatched(t *testing.T) {
+	ts := testServer(t)
+	_, g := request(t, "POST", ts.URL+"/api/games", map[string]any{"mode": "offline", "players": 2})
+	code, _ := request(t, "GET", ts.URL+"/api/games/"+g["gameId"].(string)+"/watch", nil)
+	if code != 403 {
+		t.Fatalf("watching an offline game = %d, want 403", code)
 	}
 }
 

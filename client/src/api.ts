@@ -152,12 +152,15 @@ export interface Standings {
 
 /** A table already under way — shown, but never joinable. */
 export interface RunningTable {
+  gameId: string;
   name: string;
   host: string;
   country: string;
   players: number;
   ply: number;
   minutes: number;
+  /** How many seats the computer is playing. */
+  bots: number;
 }
 
 export class ApiError extends Error {
@@ -226,6 +229,9 @@ export const api = {
     request<GameState>("/api/games/join", { gameId, password, profile }) as Promise<GameState>,
   startEarly: (id: string, token: string) =>
     request<GameState>(`/api/games/${id}/start`, { token }) as Promise<GameState>,
+
+  /** Watch a game you hold no seat at. Null when nothing changed since v. */
+  watchGame: (id: string, v = 0) => request<GameState>(`/api/games/${id}/watch?v=${v}`),
 
   // Returns null when the server reports "unchanged" (204) for version v.
   pollGame: (id: string, token: string, v: number) =>

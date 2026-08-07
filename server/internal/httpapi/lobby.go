@@ -27,15 +27,22 @@ type lobbyEntry struct {
 	Yours   bool   `json:"yours"`   // you already hold a seat here
 }
 
-// runningEntry is a table already under way. Games in progress cannot be
-// joined, so these are display-only.
+// runningEntry is a table already under way. It cannot be joined, but it can
+// be watched — which is why it carries a real game id now. Every one of these
+// is a genuine game: the server plays a handful of exhibition matches between
+// its own computer players, so the room is populated by games that actually
+// exist rather than by entries invented for the list.
 type runningEntry struct {
+	GameID  string `json:"gameId"`
 	Name    string `json:"name"`
 	Host    string `json:"host"`
 	Country string `json:"country"`
 	Players int    `json:"players"`
 	Ply     int    `json:"ply"`
 	Minutes int    `json:"minutes"`
+	// Bots is how many seats the computer is playing, so the browser can say
+	// "computer match" rather than implying people are at the table.
+	Bots int `json:"bots"`
 }
 
 func (s *Server) handleLobbies(w http.ResponseWriter, r *http.Request) {
@@ -75,77 +82,44 @@ func (s *Server) handleLobbies(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// runningTables lists games under way. Real ones first; the rest are filled in
-// so the board room never looks abandoned. See PROMPT.md §3.5 "Populated browser"
-// — the padded entries are presentation only: they are never stored, never
-// joinable, and never counted anywhere.
+// runningTables lists the games under way. Every entry is a real game with a
+// real id, because the server keeps a few exhibition matches between its own
+// computer players going (see seedExhibitions). The list used to be padded
+// with invented rows; those could not be watched, and now there is nothing to
+// invent.
+//
 // seenHost and seenName carry the entries already shown in the open list, so
 // the same person never turns up twice in the same room.
 func (s *Server) runningTables(ctx context.Context, seenHost, seenName map[string]bool) []runningEntry {
 	out := []runningEntry{}
-	if games, err := s.st.ListActive(ctx, 40); err == nil {
-		for _, g := range games {
-			// A practice board is one player against themselves, and a game
-			// nobody has touched in ten minutes has been walked away from.
-			// Neither belongs on a list of games you could be watching.
-			if g.Mode != ModeOnline || time.Since(g.UpdatedAt) > 10*time.Minute {
-				continue
-			}
-			if seenHost[g.HostName] || seenName[nameKey(g.Name)] {
-				continue // already on screen in the open list
-			}
-			host := g.HostName
-			if host == "" {
-				host = "A player"
-			}
-			seenHost[g.HostName], seenName[nameKey(g.Name)] = true, true
-			out = append(out, runningEntry{
-				Name: g.Name, Host: host, Country: g.HostCountry, Players: g.Players,
-				Ply: g.State.Ply, Minutes: int(time.Since(g.CreatedAt).Minutes()),
-			})
-			if len(out) == 6 {
-				break
-			}
-		}
-	}
-	if !s.BotLobbies {
+	games, err := s.st.ListActive(ctx, 40)
+	if err != nil {
 		return out
 	}
-	// Pad with a slowly drifting set. The seed is a coarse time bucket so the
-	// list stays put between polls instead of flickering.
-	bucket := time.Now().Unix() / 90
-	rng := mrand.New(mrand.NewSource(bucket))
-	want := 1 + rng.Intn(8) // one to eight games under way
-
-	// One table per host, and no two tables with the same name. A room where
-	// Yuki is playing twice under an identical title reads as a generator, not
-	// as a room. Bail out rather than spin if the pools run dry.
-	for _, e := range out {
-		seenHost[e.Host] = true
-		seenName[nameKey(e.Name)] = true
-	}
-	for attempts := 0; len(out) < want && attempts < want*40; attempts++ {
-		host := randomHost(rng.Intn)
-		if seenHost[host.Name] {
+	for _, g := range games {
+		// A shared-screen game is one person playing themselves, and a game
+		// nobody has touched in ten minutes has been walked away from.
+		// Neither belongs on a list of games you could be watching.
+		if g.Mode != ModeOnline || time.Since(g.UpdatedAt) > 10*time.Minute {
 			continue
 		}
-		name := tableNameFor(host, rng.Intn)
-		if seenName[nameKey(name)] {
-			continue
+		if seenHost[g.HostName] || seenName[nameKey(g.Name)] {
+			continue // already on screen in the open list
 		}
-		players := 2
-		if rng.Intn(4) == 0 {
-			players = 3 + rng.Intn(2)
+		host := g.HostName
+		if host == "" {
+			host = "A player"
 		}
-		seenHost[host.Name], seenName[nameKey(name)] = true, true
+		seenHost[g.HostName], seenName[nameKey(g.Name)] = true, true
 		out = append(out, runningEntry{
-			Name:    name,
-			Host:    host.Name,
-			Country: host.Country,
-			Players: players,
-			Ply:     4 + rng.Intn(60),
-			Minutes: 1 + rng.Intn(25),
+			GameID: g.ID, Name: g.Name, Host: host, Country: g.HostCountry,
+			Players: g.Players, Ply: g.State.Ply,
+			Minutes: int(time.Since(g.CreatedAt).Minutes()),
+			Bots:    countBots(g),
 		})
+		if len(out) == 12 {
+			break
+		}
 	}
 	return out
 }
@@ -235,6 +209,7 @@ func (s *Server) seedLobbies(ctx context.Context) {
 		taken[host.Name] = true
 		live++
 	}
+	s.seedExhibitions(ctx, taken)
 }
 
 // freeHost invents a player who is not already at a table, so the same handle
@@ -249,6 +224,98 @@ func freeHost(taken map[string]bool) (botHost, bool) {
 	}
 	return botHost{}, false
 }
+
+// seedExhibitions keeps a few computer-versus-computer games running.
+//
+// They exist so the board room shows real games. The list used to be padded
+// with invented rows, which looked the same but could not be opened, counted
+// or watched — and the moment anyone wanted to watch one, the difference
+// mattered. These are ordinary games: the same engine, the same bots, the
+// same move history, just with nobody human at the table.
+func (s *Server) seedExhibitions(ctx context.Context, taken map[string]bool) {
+	active, err := s.st.ListActive(ctx, 40)
+	if err != nil {
+		return
+	}
+	live := 0
+	for _, g := range active {
+		if g.House && g.Status == "active" && allBots(g) {
+			live++
+		}
+	}
+	if s.showTarget == 0 || live == 0 {
+		s.showTarget = randRange(2, 6)
+	}
+	for live < s.showTarget {
+		if err := s.createExhibition(ctx, taken); err != nil {
+			logf("could not start an exhibition game: %v", err)
+			return
+		}
+		live++
+	}
+}
+
+func allBots(g *store.GameRecord) bool {
+	for _, s := range g.Seats {
+		if !s.Bot {
+			return false
+		}
+	}
+	return len(g.Seats) > 0
+}
+
+func (s *Server) createExhibition(ctx context.Context, taken map[string]bool) error {
+	players := 2
+	if randRange(1, 3) == 1 {
+		players = randRange(3, 4)
+	}
+	seatOrder := game.SeatOrder(players)
+	host, ok := freeHost(taken)
+	if !ok {
+		return nil // everybody is busy; try again next pass
+	}
+	taken[host.Name] = true
+
+	rec := &store.GameRecord{
+		ID: randHex(12), Mode: ModeOnline, Status: "active", Players: players,
+		State:    game.NewState(seatOrder, seatOrder[0]),
+		Version:  1,
+		Name:     tableNameFor(host, cryptoPick),
+		HostName: host.Name, HostCountry: host.Country,
+		House: true,
+		// Not in the open list: it is already under way, and it is there to be
+		// watched rather than joined.
+		Listed: false,
+	}
+	for i, seat := range seatOrder {
+		who := host
+		if i > 0 {
+			next, ok := freeHost(taken)
+			if !ok {
+				return nil
+			}
+			who = next
+			taken[who.Name] = true
+		}
+		rec.Seats = append(rec.Seats, store.Seat{
+			Seat: seat, Skin: pick(exhibitionSkins), Taken: true, Bot: true,
+			Token: randHex(16), Name: who.Name, Country: who.Country,
+			Difficulty: pick(game.Difficulties),
+		})
+	}
+	var err error
+	for i := 0; i < 6; i++ {
+		rec.Code = randCode()
+		if err = s.st.Create(ctx, rec); err == nil {
+			logf("exhibition game %s started (%d computer players)", rec.ID, players)
+			return nil
+		}
+	}
+	return err
+}
+
+// Exhibition games show off the skins rather than all wearing the default.
+var exhibitionSkins = []string{"clay", "royal", "crystal", "rune"}
 
 func (s *Server) createBotLobby(ctx context.Context, host botHost) error {
 	players := 2

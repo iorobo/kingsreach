@@ -1,4 +1,5 @@
 import type { CatalogItem, GameState, Lobby, Profile, RankEntry, RunningTable, Standings } from "./api";
+import { RELEASES, VERSION } from "./changelog";
 import type { Credit } from "./credits";
 import { ASSET_CREDITS, creditLine } from "./credits";
 import { countryList, countryName, flagChip } from "./flags";
@@ -47,6 +48,7 @@ export interface UiHandlers {
   browse(): void;
   refresh(): void;
   joinTable(gameId: string, password: string): void;
+  watchTable(gameId: string): void;
   createTable(opts: TableOptions): void;
   offline(players: number): void;
   leaderboard(): void;
@@ -133,6 +135,9 @@ export class Ui {
       $("flagpicker").classList.add("hidden");
       h.setCountry($<HTMLSelectElement>("my-country").value);
     };
+    $("btn-version").textContent = `v${VERSION}`;
+    $("btn-version").onclick = () => this.showChangelog();
+    $("btn-close-changelog").onclick = () => $("changelog").classList.add("hidden");
     $("btn-music").onclick = () => h.toggleMusic();
     $("btn-collection").onclick = () => this.showCollection();
     $("btn-close-collection").onclick = () => $("collection").classList.add("hidden");
@@ -350,6 +355,48 @@ export class Ui {
     }
   }
 
+  /** The version, and behind it what each one changed. */
+  private showChangelog(): void {
+    $("changelog-version").textContent = `You are playing version ${VERSION}.`;
+    const list = $("changelog-list");
+    list.replaceChildren();
+    RELEASES.forEach((rel, i) => {
+      const box = document.createElement("div");
+      box.className = "release" + (i > 0 ? " old" : "");
+
+      const head = document.createElement("div");
+      const ver = document.createElement("span");
+      ver.className = "ver";
+      ver.textContent = `v${rel.version}`;
+      const when = document.createElement("span");
+      when.className = "when";
+      when.textContent = new Date(rel.date + "T00:00:00").toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+      head.append(ver, when);
+      box.appendChild(head);
+
+      if (rel.headline) {
+        const line = document.createElement("div");
+        line.className = "headline";
+        line.textContent = rel.headline;
+        box.appendChild(line);
+      }
+
+      const ul = document.createElement("ul");
+      for (const change of rel.changes) {
+        const li = document.createElement("li");
+        li.textContent = change;
+        ul.appendChild(li);
+      }
+      box.appendChild(ul);
+      list.appendChild(box);
+    });
+    $("changelog").classList.remove("hidden");
+  }
+
   private showFlagPicker(): void {
     const select = $<HTMLSelectElement>("my-country");
     select.value = this.profile?.country ?? "";
@@ -361,7 +408,7 @@ export class Ui {
   private hideAll(): void {
     for (const id of [
       "signin", "menu", "browser", "create", "joinpass", "lobby", "result",
-      "collection", "leaderboard", "flagpicker",
+      "collection", "leaderboard", "flagpicker", "changelog",
     ]) {
       $(id).classList.add("hidden");
     }
@@ -492,7 +539,7 @@ export class Ui {
     const body = $("lobby-rows");
     body.replaceChildren();
     for (const l of open) body.appendChild(this.lobbyRow(l));
-    for (const r of live) body.appendChild(runningRow(r));
+    for (const r of live) body.appendChild(runningRow(r, (id) => this.h.watchTable(id)));
 
     if (!open.length && !live.length) {
       const tr = document.createElement("tr");
@@ -646,7 +693,19 @@ export class Ui {
   showGame(): void {
     this.hideAll();
     document.body.classList.remove("hud-hidden");
+    document.body.classList.remove("watching");
     this.disarmResign();
+  }
+
+  /**
+   * Watching somebody else's game. Same board, but the controls that only make
+   * sense with a seat are gone — a spectator with a Resign button is a bug
+   * waiting to be reported.
+   */
+  showWatching(): void {
+    this.hideAll();
+    document.body.classList.remove("hud-hidden");
+    document.body.classList.add("watching");
   }
 
   showResult(title: string, reason: string): void {
@@ -729,6 +788,23 @@ export class Ui {
         : `You are ${seatName(state.you as never)}`;
     $("gamecode").textContent = state.mode === "online" ? state.name : "";
     ($("btn-resign") as HTMLButtonElement).disabled = state.status !== "active";
+    this.renderPlayers(state);
+  }
+
+  /** The same HUD from a spectator's chair: the state of play, no controls. */
+  updateWhileWatching(state: GameState): void {
+    this.showWatching();
+    if (state.status === "finished") {
+      this.status(
+        state.winner ? `${seatName(state.winner)} won this one` : "That game ended in a draw",
+      );
+    } else if (state.phase === "roll") {
+      this.status(`Rolling for the opening move — ${(state.pending ?? []).map(seatName).join(", ")}`);
+    } else {
+      this.status(`${seatName(state.turn)} to move — move ${state.ply}`);
+    }
+    $("seat").textContent = "Watching";
+    $("gamecode").textContent = state.name;
     this.renderPlayers(state);
   }
 
@@ -909,8 +985,8 @@ function onEnter(input: HTMLInputElement, run: () => void): void {
   });
 }
 
-/** A game under way — shown for the room's sake, never joinable. */
-function runningRow(r: RunningTable): HTMLElement {
+/** A game under way: not joinable, but you can pull up a chair and watch. */
+function runningRow(r: RunningTable, onWatch: (id: string) => void): HTMLElement {
   const row = document.createElement("tr");
   row.className = "running";
 
@@ -941,10 +1017,11 @@ function runningRow(r: RunningTable): HTMLElement {
 
   const act = document.createElement("td");
   act.className = "act";
-  const tag = document.createElement("span");
-  tag.className = "live";
-  tag.textContent = "in progress";
-  act.appendChild(tag);
+  const btn = document.createElement("button");
+  btn.className = "ghost";
+  btn.textContent = "Watch";
+  btn.onclick = () => onWatch(r.gameId);
+  act.appendChild(btn);
 
   row.append(name, seats, when, act);
   return row;
