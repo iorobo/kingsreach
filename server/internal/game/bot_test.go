@@ -10,7 +10,7 @@ func botRNG() *rand.Rand { return rand.New(rand.NewSource(7)) }
 func TestBotTakesTheThrone(t *testing.T) {
 	b := board(t)
 	s := duel(West, pc("wK", West, 1, "2,0"), pc("eK", East, 1, "8,0"))
-	from, to, ok := b.ChooseMove(s, West, botRNG())
+	from, to, ok := b.ChooseMove(s, West, Hard, botRNG())
 	if !ok {
 		t.Fatalf("bot found no move")
 	}
@@ -30,7 +30,7 @@ func TestBotTakesAnExposedKing(t *testing.T) {
 	// Put the kings somewhere sane: west king out of the way, east king reachable.
 	s.PieceByID("wK").Node = "8,2"
 	s.PieceByID("eK").Node = "-8,0"
-	from, to, ok := b.ChooseMove(s, West, botRNG())
+	from, to, ok := b.ChooseMove(s, West, Hard, botRNG())
 	if !ok {
 		t.Fatalf("bot found no move")
 	}
@@ -62,7 +62,7 @@ func TestBotDoesNotHangItsKing(t *testing.T) {
 	if risky == "" {
 		t.Skip("no square in this position exposes the king; nothing to test")
 	}
-	_, to, ok := b.ChooseMove(s, West, botRNG())
+	_, to, ok := b.ChooseMove(s, West, Hard, botRNG())
 	if !ok {
 		t.Fatalf("bot found no move")
 	}
@@ -80,7 +80,7 @@ func TestBotsPlayAFullGame(t *testing.T) {
 
 	for ply := 0; ply < MaxPlies && s.Status == StatusActive; ply++ {
 		seat := s.Turn
-		from, to, ok := b.ChooseMove(s, seat, rng)
+		from, to, ok := b.ChooseMove(s, seat, Medium, rng)
 		if !ok {
 			t.Fatalf("ply %d: %s had no move but is still in the game", ply, seat)
 		}
@@ -107,7 +107,7 @@ func TestBotBeatsAimlessOpponent(t *testing.T) {
 		rng := rand.New(rand.NewSource(int64(g + 1)))
 		for s.Status == StatusActive && s.Ply < 400 {
 			if s.Turn == West {
-				from, to, ok := b.ChooseMove(s, West, rng)
+				from, to, ok := b.ChooseMove(s, West, Medium, rng)
 				if !ok {
 					break
 				}

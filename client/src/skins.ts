@@ -53,18 +53,24 @@ function styleFor(scene: Scene, skinId: string, seat: Seat): SkinStyle {
             roughness: 0.06,
           }),
       };
-    case "crystal":
+    case "crystal": {
+      // The gem is a pale, glowing version of the seat's hue, so pips *of that
+      // hue* vanish into it — which is exactly what they used to do, leaving
+      // the piece's value unreadable. They take the contrast colour like every
+      // other skin, unlit so the glow cannot wash them out again.
+      const gemBody = Color3.Lerp(hue, Color3.White(), 0.35);
       return {
         shape: "gem",
         body: () =>
-          mat(scene, "b", Color3.Lerp(hue, Color3.White(), 0.35), {
+          mat(scene, "b", gemBody, {
             emissive: hue.scale(0.45),
             specular: new Color3(1, 1, 1),
-            alpha: 0.66,
+            alpha: 0.82,
             roughness: 0.05,
           }),
-        pip: () => mat(scene, "p", hue.scale(0.35), { emissive: hue.scale(1.15) }),
+        pip: () => mat(scene, "p", contrastTo(gemBody), { unlit: true }),
       };
+    }
     case "rune":
       return {
         shape: "stone",
@@ -85,8 +91,22 @@ function styleFor(scene: Scene, skinId: string, seat: Seat): SkinStyle {
   }
 }
 
-/** Builds the meshes for one piece under `root` and returns them all. */
-export function buildPiece(scene: Scene, root: Mesh, skinId: string, seat: Seat, value: number): Mesh[] {
+/**
+ * Builds the meshes for one piece under `root` and returns them all.
+ *
+ * `rank` is the owner's place in the hall of champions, 0 for everyone else.
+ * The top three get a taller, gilded crown on their king — the whole point of
+ * a leaderboard is that it shows at the table, not only on a screen you have
+ * to go and open.
+ */
+export function buildPiece(
+  scene: Scene,
+  root: Mesh,
+  skinId: string,
+  seat: Seat,
+  value: number,
+  rank = 0,
+): Mesh[] {
   const st = styleFor(scene, skinId, seat);
   const bodyMat = st.body();
   const pipMat = st.pip();
@@ -134,16 +154,46 @@ export function buildPiece(scene: Scene, root: Mesh, skinId: string, seat: Seat,
   }
 
   if (value === 1) {
-    const crownMat = st.crown ? st.crown() : pipMat;
-    const band = disc(scene, "crown", 0.13, 0.03, crownMat, root);
+    const crowned = rank >= 1 && rank <= 3;
+    const crownMat = crowned ? championCrown(scene, rank) : st.crown ? st.crown() : pipMat;
+    const band = disc(scene, "crown", crowned ? 0.16 : 0.13, crowned ? 0.045 : 0.03, crownMat, root);
     band.position.y = pipY + 0.08;
     parts.push(band);
-    const tip = MeshBuilder.CreateSphere("crown-tip", { diameter: 0.1, segments: 10 }, scene);
+
+    if (crowned) {
+      // Points round the band, one more for each place up the board, so first
+      // and third are told apart at a glance rather than by counting pixels.
+      const points = 6 - rank;
+      for (let i = 0; i < points; i++) {
+        const spike = MeshBuilder.CreateCylinder(
+          "crown-point",
+          { diameterBottom: 0.05, diameterTop: 0, height: 0.13, tessellation: 6 },
+          scene,
+        );
+        spike.material = crownMat;
+        spike.parent = root;
+        const a = (i / points) * Math.PI * 2;
+        spike.position = new Vector3(Math.cos(a) * 0.13, pipY + 0.16, Math.sin(a) * 0.13);
+        parts.push(spike);
+      }
+    }
+
+    const tip = MeshBuilder.CreateSphere("crown-tip", { diameter: crowned ? 0.13 : 0.1, segments: 10 }, scene);
     tip.material = crownMat;
     tip.parent = root;
-    tip.position.y = pipY + 0.17;
+    tip.position.y = pipY + (crowned ? 0.22 : 0.17);
     parts.push(tip);
   }
 
   return parts;
+}
+
+/** Gold for a champion, brightest at the top of the board. */
+function championCrown(scene: Scene, rank: number) {
+  const shine = [0.55, 0.38, 0.24][rank - 1] ?? 0.24;
+  return mat(scene, "crown-champion", C.gold, {
+    emissive: C.goldPale.scale(shine),
+    specular: new Color3(1, 0.95, 0.75),
+    roughness: 0.05,
+  });
 }

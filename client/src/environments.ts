@@ -279,6 +279,55 @@ function buildStore(scene: Scene, root: TransformNode): ShadowGenerator {
 
 // ---- 4. Streetside Café ----
 
+/**
+ * Fades scenery that comes between the camera and the board.
+ *
+ * Placing props "out of the sightline" only works if you know where players
+ * sit, and this game seats two, three or four of them at six possible corners
+ * — and lets everyone orbit freely on top of that. Rather than guess an angle
+ * that is clear for every combination, anything that ends up in front of the
+ * board simply gets out of the way while it is there.
+ */
+function fadeWhenInTheWay(scene: Scene, meshes: Mesh[]): void {
+  // The board is a flat disc. Two tests are tempting and both wrong: the line
+  // to its *centre* misses a lamp hanging in front of the far edge, and a
+  // sphere around it hides the lamps almost always, because a sphere that
+  // wide also reaches up to where they hang.
+  //
+  // So ask the question directly: follow the ray from the eye through the
+  // prop, and see whether it lands on the board beyond it. If it does, the
+  // prop is between the player and a piece of board they want to see.
+  const BOARD_RADIUS = 5.6;
+  const PROP_RADIUS = 0.85;
+
+  for (const m of meshes) {
+    m.isPickable = false;
+    m.visibility = 1;
+  }
+  scene.onBeforeRenderObservable.add(() => {
+    const camera = scene.activeCamera;
+    if (!camera) return;
+    const eye = camera.globalPosition;
+
+    for (const m of meshes) {
+      const at = m.getAbsolutePosition();
+      const toProp = at.subtract(eye);
+      const dist = toProp.length();
+      let hide = false;
+      if (dist > 0.01 && toProp.y < 0) {
+        const dir = toProp.scale(1 / dist);
+        const t = -eye.y / dir.y; // where the ray meets the board plane
+        if (t > dist) {
+          const hit = eye.add(dir.scale(t));
+          hide = Math.hypot(hit.x, hit.z) < BOARD_RADIUS + PROP_RADIUS;
+        }
+      }
+      const want = hide ? 0.1 : 1;
+      m.visibility += (want - m.visibility) * 0.18; // ease, so it never blinks
+    }
+  });
+}
+
 function buildCafe(scene: Scene, root: TransformNode): ShadowGenerator {
   scene.clearColor = Color4.FromHexString("#141218ff");
   scene.fogMode = Scene.FOGMODE_EXP2;
@@ -286,10 +335,14 @@ function buildCafe(scene: Scene, root: TransformNode): ShadowGenerator {
   scene.fogDensity = 0.025;
   ambient(scene, root, Color3.FromHexString("#6E6A78"), 0.4);
   const shadows = sun(scene, root, new Vector3(0.15, -0.95, -0.2), Color3.FromHexString("#FFE0B0"), 0.85);
-  // Players look along the X axis, so anything hanging over the table lives
-  // on Z to stay out of both sightlines.
-  lamp(scene, root, new Vector3(0, 3.1, -4.4), Color3.FromHexString("#FFD9A0"), 0.9, 14);
-  lamp(scene, root, new Vector3(0, 3.1, 4.4), Color3.FromHexString("#FFD9A0"), 0.9, 14);
+  // These sat at z = ±4.4 on the reasoning that "players look along the X
+  // axis" — true when the game seated two people, west and east. At three or
+  // four the seats are on the diagonals and look straight through them.
+  // Nudged outward, but the real fix is `fadeWhenInTheWay` below: pendants
+  // belong over the table, so rather than banish them somewhere they can
+  // never be in shot, they step aside while they are.
+  lamp(scene, root, new Vector3(0, 3.4, -5.4), Color3.FromHexString("#FFD9A0"), 0.95, 15);
+  lamp(scene, root, new Vector3(0, 3.4, 5.4), Color3.FromHexString("#FFD9A0"), 0.95, 15);
   lamp(scene, root, new Vector3(12, 3.2, -9), Color3.FromHexString("#FFC880"), 0.5, 14);
 
   const floorY = -3.6;
@@ -304,26 +357,29 @@ function buildCafe(scene: Scene, root: TransformNode): ShadowGenerator {
   const tableTex = woodTexture(scene, "#6E4632", "#4A2E1E");
   table(scene, root, 6.2, floorY, tableTex, "#2A2622");
 
-  // Pendant lamps over the board.
+  // Pendant lamps over the board, grouped so they can get out of the way.
   const shadeMat = mat(scene, "shade", Color3.FromHexString("#8A3A2E"), { roughness: 0.4 });
   const bulbMat = mat(scene, "bulb", Color3.FromHexString("#FFE8B8"), { emissive: Color3.FromHexString("#FFDCA0") });
-  for (const z of [-4.4, 4.4]) {
+  for (const z of [-5.4, 5.4]) {
+    const pendant = new TransformNode("pendant", scene);
+    pendant.parent = root;
     const cord = MeshBuilder.CreateCylinder("cord", { diameter: 0.05, height: 2.2, tessellation: 6 }, scene);
     cord.material = mat(scene, "cord", Color3.FromHexString("#1A1A1A"), { roughness: 1 });
-    cord.parent = root;
-    cord.position.set(0, 4.5, z);
+    cord.parent = pendant;
+    cord.position.set(0, 4.8, z);
     const shade = MeshBuilder.CreateCylinder(
       "shade",
       { diameterTop: 0.25, diameterBottom: 1.5, height: 0.9, tessellation: 20 },
       scene,
     );
     shade.material = shadeMat;
-    shade.parent = root;
-    shade.position.set(0, 3.4, z);
+    shade.parent = pendant;
+    shade.position.set(0, 3.7, z);
     const bulb = MeshBuilder.CreateSphere("bulb", { diameter: 0.34, segments: 10 }, scene);
     bulb.material = bulbMat;
-    bulb.parent = root;
-    bulb.position.set(0, 3.05, z);
+    bulb.parent = pendant;
+    bulb.position.set(0, 3.35, z);
+    fadeWhenInTheWay(scene, [cord, shade, bulb]);
   }
 
   const woodDark = mat(scene, "cafe-wood", Color3.FromHexString("#4A362A"), { roughness: 0.5 });

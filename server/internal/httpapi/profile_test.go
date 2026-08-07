@@ -48,11 +48,19 @@ func TestDevUnlockAll(t *testing.T) {
 		}
 	}
 
-	// With the flag off again the gate is back in place.
+	// With the flag off again the gate is back in place: a fresh profile sees
+	// exactly the items that ask for nothing. Counted rather than hard-coded,
+	// so adding a free item (the boards, say) does not look like a regression.
 	UnlockAll = false
+	free := 0
+	for _, it := range catalog {
+		if it.NeedPlays == 0 && it.NeedWins == 0 {
+			free++
+		}
+	}
 	_, fresh := request(t, "POST", ts.URL+"/api/profile", nil)
-	if got := len(fresh["unlocked"].([]any)); got != 2 {
-		t.Fatalf("unlocked without dev mode = %d, want 2 defaults", got)
+	if got := len(fresh["unlocked"].([]any)); got != free {
+		t.Fatalf("unlocked without dev mode = %d, want the %d items with no requirement", got, free)
 	}
 	code, _ := request(t, "POST", ts.URL+"/api/profile/equip",
 		map[string]string{"token": fresh["token"].(string), "skin": "rune"})

@@ -184,14 +184,14 @@ func (m *Memory) GetProfileByToken(ctx context.Context, token string) (*Profile,
 	return &cp, nil
 }
 
-func (m *Memory) UpdateProfileEquip(ctx context.Context, id, skin, env string) error {
+func (m *Memory) UpdateProfileEquip(ctx context.Context, id, skin, env, board string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.profByID[id]
 	if !ok {
 		return ErrNotFound
 	}
-	p.EquippedSkin, p.EquippedEnv = skin, env
+	p.EquippedSkin, p.EquippedEnv, p.EquippedBoard = skin, env, board
 	p.UpdatedAt = time.Now().UTC()
 	return nil
 }

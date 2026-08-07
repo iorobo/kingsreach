@@ -27,6 +27,11 @@ export interface SeatDto {
   name?: string;
   avatar?: string;
   country?: string;
+  /** Hall-of-champions place, 0 or absent for everyone else. */
+  rank?: number;
+  /** Played by the computer, and at which difficulty. */
+  bot?: boolean;
+  level?: string;
 }
 
 export interface DiceThrow {
@@ -69,6 +74,10 @@ export interface GameState {
   pieces: PieceDto[];
   lastMove: MoveRecord | null;
   token?: string;
+  /** When the player on the move runs out of time (RFC 3339); "" for no clock. */
+  deadline?: string;
+  /** Set on a finished game once somebody has asked for another one. */
+  rematchId?: string;
 }
 
 /** A state plus the die just thrown, returned by the roll endpoint. */
@@ -86,7 +95,7 @@ export interface MoveOption {
 
 export interface CatalogItem {
   id: string;
-  kind: "skin" | "env";
+  kind: "skin" | "env" | "board";
   name: string;
   desc: string;
   needPlays: number;
@@ -105,6 +114,7 @@ export interface Profile {
   wins: number;
   equippedSkin: string;
   equippedEnv: string;
+  equippedBoard: string;
   unlocked: string[];
 }
 
@@ -191,8 +201,11 @@ export const api = {
   getProfile: (token: string) => request<Profile>(`/api/profile?token=${encodeURIComponent(token)}`) as Promise<Profile>,
   updateProfile: (token: string, name: string, country: string) =>
     request<Profile>("/api/profile/update", { token, name, country }) as Promise<Profile>,
-  equip: (token: string, what: { skin?: string; env?: string }) =>
+  equip: (token: string, what: { skin?: string; env?: string; board?: string }) =>
     request<Profile>("/api/profile/equip", { token, ...what }) as Promise<Profile>,
+
+  rematch: (id: string, token: string) =>
+    request<GameState>(`/api/games/${id}/rematch`, { token }) as Promise<GameState>,
 
   leaderboard: (token: string) =>
     request<Standings>(`/api/leaderboard?token=${encodeURIComponent(token)}`) as Promise<Standings>,

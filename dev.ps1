@@ -27,5 +27,8 @@ $env:KINGSREACH_UNLOCK_ALL = "1"
 # reach this address, so a real sign-in only completes from a public host —
 # locally the button is there but the round trip will not finish.
 $env:PUBLIC_URL = "http://localhost:8080"
+# A short move clock makes the countdown easy to see while working on it;
+# 150 seconds is the real default. Set to 0 to switch the clock off entirely.
+$env:KINGSREACH_MOVE_SECONDS = "150"
 Set-Location "$root\server"
 go run ./cmd/server

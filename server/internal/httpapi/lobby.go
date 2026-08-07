@@ -269,6 +269,7 @@ func (s *Server) createBotLobby(ctx context.Context, host botHost) error {
 			st.Taken, st.Bot = true, true
 			st.Token = randHex(16)
 			st.Name, st.Country = host.Name, host.Country
+			st.Difficulty = pick(game.Difficulties)
 		}
 		rec.Seats = append(rec.Seats, st)
 	}
@@ -306,12 +307,13 @@ func fillBotSeats(rec *store.GameRecord) {
 		rec.Seats[i].Token = randHex(16)
 		rec.Seats[i].Skin = DefaultSkin
 		rec.Seats[i].Name, rec.Seats[i].Country = host.Name, host.Country
+		rec.Seats[i].Difficulty = pick(game.Difficulties)
 	}
 }
 
-// RunBots takes computer turns until the context ends. Bots throw their
-// opening die and play their moves after a short pause, so a game with one
-// feels like a game with someone on the other side.
+// RunBots drives everything that has to happen without anybody asking: the
+// computer taking its turns, and the clock running out on players who have
+// walked away. Both need to work whether or not a browser is polling.
 func (s *Server) RunBots(ctx context.Context) {
 	rng := mrand.New(mrand.NewSource(time.Now().UnixNano()))
 	ticker := time.NewTicker(900 * time.Millisecond)
@@ -332,10 +334,69 @@ func (s *Server) stepBots(ctx context.Context, rng *mrand.Rand) {
 		return
 	}
 	for _, g := range games {
-		if !g.HasBot() {
+		// The move clock applies to every table, and a game with no bot in it
+		// is exactly the human-versus-human case that needs it most — this
+		// loop used to skip those entirely.
+		s.sweepClock(ctx, g.ID)
+		if g.HasBot() {
+			s.stepOneGame(ctx, g.ID, rng)
+		}
+	}
+}
+
+// sweepClock knocks out anyone who has run out of time. Bots are exempt: they
+// have their own bounded pause and cannot stall.
+func (s *Server) sweepClock(ctx context.Context, id string) {
+	if s.timings.Move <= 0 {
+		return
+	}
+	mu := s.lock(id)
+	mu.Lock()
+	defer mu.Unlock()
+
+	rec, err := s.st.Get(ctx, id)
+	if err != nil || rec.Status != "active" || rec.Mode != ModeOnline {
+		return
+	}
+	now := s.now()
+	overdue := rec.State.Overdue(now)
+	if len(overdue) == 0 {
+		return
+	}
+
+	knocked := 0
+	for _, seat := range overdue {
+		if s.seatIsBot(rec, seat) {
 			continue
 		}
-		s.stepOneGame(ctx, g.ID, rng)
+		if err := rec.State.TimeOut(s.board, seat); err != nil {
+			continue
+		}
+		logf("game %s: %s ran out of time", rec.ID, seat)
+		knocked++
+	}
+	// Nobody human was overdue — only the computer, which is about to act
+	// anyway. Give the clock a fresh turn rather than leaving it expired and
+	// sweeping the same game every tick.
+	s.armClock(rec)
+	if knocked == 0 {
+		if err := s.st.Update(ctx, rec); err != nil {
+			logf("clock re-arm failed for %s: %v", rec.ID, err)
+		}
+		return
+	}
+
+	if rec.State.Status == game.StatusFinished {
+		rec.Status = "finished"
+	}
+	rec.Version++
+	if err := s.st.Update(ctx, rec); err != nil {
+		logf("timeout save failed for %s: %v", rec.ID, err)
+		return
+	}
+	if rec.Status == "finished" {
+		logf("game %s finished on the clock: winner=%s (%s)", rec.ID, rec.State.Winner, rec.State.WinReason)
+		s.awardStats(ctx, rec)
 	}
 }
 
@@ -358,6 +419,7 @@ func (s *Server) stepOneGame(ctx context.Context, id string, rng *mrand.Rand) {
 			if _, err := rec.State.RollDie(seat, rollDie); err != nil {
 				continue
 			}
+			s.armClock(rec)
 			rec.Version++
 			if err := s.st.Update(ctx, rec); err != nil {
 				logf("bot roll save failed: %v", err)
@@ -371,7 +433,16 @@ func (s *Server) stepOneGame(ctx context.Context, id string, rng *mrand.Rand) {
 		return
 	}
 	seat := rec.State.Turn
-	from, to, ok := s.board.ChooseMove(rec.State, seat, rng)
+	difficulty := s.seatDifficulty(rec, seat)
+
+	// Pause before answering. A reply that lands the instant you let go of
+	// your own stone reads as a script rather than an opponent.
+	weighty := rec.State.LastMove != nil && rec.State.LastMove.Captured != ""
+	if !s.think.ready(id, s.now(), s.timings.ThinkTime(difficulty, weighty, rng)) {
+		return
+	}
+
+	from, to, ok := s.board.ChooseMove(rec.State, seat, difficulty, rng)
 	if !ok {
 		return // the engine will knock them out on the next turn change
 	}
@@ -380,6 +451,7 @@ func (s *Server) stepOneGame(ctx context.Context, id string, rng *mrand.Rand) {
 		logf("game %s: bot %s tried an illegal move %s->%s: %v", id, seat, from, to, err)
 		return
 	}
+	s.armClock(rec)
 	if rec.State.Status == game.StatusFinished {
 		rec.Status = "finished"
 	}
@@ -407,6 +479,15 @@ func (s *Server) seatIsBot(rec *store.GameRecord, seat game.Color) bool {
 		}
 	}
 	return false
+}
+
+func (s *Server) seatDifficulty(rec *store.GameRecord, seat game.Color) string {
+	for _, st := range rec.Seats {
+		if st.Seat == seat && st.Difficulty != "" {
+			return st.Difficulty
+		}
+	}
+	return game.Medium
 }
 
 // handleLobbyStart lets a host begin a table that is not full yet; the
@@ -439,6 +520,7 @@ func (s *Server) handleLobbyStart(w http.ResponseWriter, r *http.Request) {
 	}
 	fillBotSeats(rec)
 	startGame(rec)
+	s.armClock(rec)
 	rec.Version++
 	if err := s.st.Update(r.Context(), rec); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not start the table")

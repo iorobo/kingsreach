@@ -100,6 +100,15 @@
     backdrop-filter: blur(6px); border-color: var(--line); border-style: solid; border-width: 0;
   }
   #topbar { top: 0; border-bottom-width: 1px; justify-content: center; font-size: 17px; min-height: 44px; }
+  /* Move clock. Silent countdowns are traps, so it is always on screen while
+     it is your turn, and unmistakable once it is nearly up. */
+  #clock {
+    font-variant-numeric: tabular-nums; font-size: 15px; color: #a99e8c;
+    border: 1px solid var(--line); border-radius: 8px; padding: 2px 9px; min-width: 62px;
+  }
+  #clock.urgent { color: #ffb4a2; border-color: #a05242; background: rgba(160,82,66,.18); }
+  #clock.urgent.blink { animation: pulse 1s steps(2, end) infinite; }
+  @keyframes pulse { 50% { opacity: .45; } }
   #bottombar { bottom: 0; border-top-width: 1px; flex-wrap: wrap; }
   #bottombar button { padding: 7px 14px; font-size: 15px; }
   #seat { color: var(--teal); font-size: 14px; }
@@ -259,7 +268,10 @@
 <body>
   <canvas id="scene" touch-action="none"></canvas>
 
-  <div id="topbar"><span id="status">…</span></div>
+  <div id="topbar">
+    <span id="status">…</span>
+    <span id="clock" class="hidden"></span>
+  </div>
 
   <div id="players"></div>
 
@@ -267,7 +279,7 @@
     <span id="seat"></span>
     <span id="gamecode"></span>
     <span class="spacer"></span>
-    <button id="btn-throw" class="primary hidden" title="Throw the die">Throw the die</button>
+    <button id="btn-throw" class="primary hidden" title="Roll the die">Roll the die</button>
     <button id="btn-focus" title="Look from your side of the table again">Focus</button>
     <button id="btn-resign">Resign</button>
     <button id="btn-leave">Leave</button>
@@ -435,7 +447,9 @@
     <div class="card">
       <h1 id="result-title" style="font-size:32px"></h1>
       <div class="tagline" id="result-reason"></div>
-      <button class="primary wide" id="btn-back">Back to the great hall</button>
+      <button class="primary wide" id="btn-rematch">Rematch</button>
+      <div class="hint hidden" id="rematch-note"></div>
+      <button class="ghost wide" id="btn-back">Back to the great hall</button>
     </div>
   </div>
 

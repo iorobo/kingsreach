@@ -72,25 +72,30 @@ func newSalt() string {
 }
 
 type profilePayload struct {
-	Token        string   `json:"token"`
-	Kind         string   `json:"kind"`
-	Name         string   `json:"name"`
-	Avatar       string   `json:"avatar"`
-	Country      string   `json:"country"`
-	Persistent   bool     `json:"persistent"` // does progress survive?
-	GamesPlayed  int      `json:"gamesPlayed"`
-	Wins         int      `json:"wins"`
-	EquippedSkin string   `json:"equippedSkin"`
-	EquippedEnv  string   `json:"equippedEnv"`
-	Unlocked     []string `json:"unlocked"`
-	DevUnlockAll bool     `json:"devUnlockAll"`
+	Token         string   `json:"token"`
+	Kind          string   `json:"kind"`
+	Name          string   `json:"name"`
+	Avatar        string   `json:"avatar"`
+	Country       string   `json:"country"`
+	Persistent    bool     `json:"persistent"` // does progress survive?
+	GamesPlayed   int      `json:"gamesPlayed"`
+	Wins          int      `json:"wins"`
+	EquippedSkin  string   `json:"equippedSkin"`
+	EquippedEnv   string   `json:"equippedEnv"`
+	EquippedBoard string   `json:"equippedBoard"`
+	Unlocked      []string `json:"unlocked"`
+	DevUnlockAll  bool     `json:"devUnlockAll"`
 }
 
 func toProfilePayload(p *store.Profile) *profilePayload {
+	board := p.EquippedBoard
+	if board == "" {
+		board = DefaultBoard // profiles predating the board picker
+	}
 	return &profilePayload{
 		Token: p.Token, Kind: p.Kind, Name: p.Name, Avatar: p.Avatar, Country: p.Country,
 		Persistent: p.Persistent(), GamesPlayed: p.GamesPlayed, Wins: p.Wins,
-		EquippedSkin: p.EquippedSkin, EquippedEnv: p.EquippedEnv,
+		EquippedSkin: p.EquippedSkin, EquippedEnv: p.EquippedEnv, EquippedBoard: board,
 		Unlocked: unlockedIDs(p), DevUnlockAll: UnlockAll,
 	}
 }

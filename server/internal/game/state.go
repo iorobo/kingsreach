@@ -1,6 +1,9 @@
 package game
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 const (
 	StatusActive   = "active"
@@ -20,6 +23,10 @@ const (
 	OutKingTaken = "king-captured"
 	OutBlocked   = "no-legal-move"
 	OutResigned  = "resigned"
+	// OutTimedOut is its own cause rather than being folded into OutResigned:
+	// walking away and giving up are different things, and the seat list says
+	// so to the person it happened to.
+	OutTimedOut = "out-of-time"
 )
 
 // MaxPlies is a server safeguard (house rule): after this many plies the game
@@ -71,6 +78,59 @@ type State struct {
 	Dice      [][]DiceThrow `json:"dice,omitempty"`    // one entry per round; the last may be in progress
 	Pending   []Color       `json:"pending,omitempty"` // seats that still have to throw
 	LastMove  *MoveRecord   `json:"lastMove,omitempty"`
+	// TurnDeadline is when whoever we are waiting on runs out of time. Zero
+	// means no clock. The engine only records it; the caller decides how long
+	// an action may take and enforces expiry, because only the caller knows
+	// which seats are people and which are the computer.
+	TurnDeadline time.Time `json:"turnDeadline,omitempty"`
+}
+
+// ArmClock gives whoever we are now waiting on a fresh allowance. Called after
+// any action, since an action always changes who we are waiting for. A zero or
+// negative duration turns the clock off.
+func (s *State) ArmClock(now time.Time, d time.Duration) {
+	if s.Status != StatusActive || d <= 0 {
+		s.TurnDeadline = time.Time{}
+		return
+	}
+	s.TurnDeadline = now.Add(d)
+}
+
+// Overdue lists the seats that have run out of time: the seat to move once
+// play has started, or everyone who still owes a throw during the opening. It
+// returns nothing while the clock is off or still running.
+func (s *State) Overdue(now time.Time) []Color {
+	if s.Status != StatusActive || s.TurnDeadline.IsZero() || now.Before(s.TurnDeadline) {
+		return nil
+	}
+	if s.Phase == PhaseRoll {
+		out := make([]Color, 0, len(s.Pending))
+		for _, seat := range s.Pending {
+			if !s.IsOut(seat) {
+				out = append(out, seat)
+			}
+		}
+		return out
+	}
+	if s.IsOut(s.Turn) {
+		return nil
+	}
+	return []Color{s.Turn}
+}
+
+// TimeOut knocks a player out for taking too long. Same consequence as
+// resigning — their stones stay on the board and the last player standing
+// wins — so a table with one opponent left simply hands them the game.
+func (s *State) TimeOut(b *Board, c Color) error {
+	if s.Status != StatusActive {
+		return ErrGameOver
+	}
+	if s.IsOut(c) {
+		return ErrNotPlaying
+	}
+	s.knockOut(c, OutTimedOut)
+	s.settleAfterKnockout(b, c)
+	return nil
 }
 
 // Starting setup for the west player, exactly as in the rules diagram and the

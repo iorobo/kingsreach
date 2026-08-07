@@ -22,8 +22,9 @@ type CatalogItem struct {
 }
 
 const (
-	DefaultSkin = "clay"
-	DefaultEnv  = "picnic"
+	DefaultSkin  = "clay"
+	DefaultEnv   = "picnic"
+	DefaultBoard = "slate"
 )
 
 var catalog = []CatalogItem{
@@ -36,6 +37,12 @@ var catalog = []CatalogItem{
 	{ID: "dust2", Kind: "env", Name: "Bombsite B", Desc: "A duel on the crates, somewhere hot and dusty.", NeedWins: 2},
 	{ID: "store", Kind: "env", Name: "Boardgame Store", Desc: "Shelves of well-loved boxes and warm lamplight.", NeedWins: 4},
 	{ID: "cafe", Kind: "env", Name: "Streetside Café", Desc: "A quiet corner table and strong coffee.", NeedPlays: 8},
+	// Boards are a preference, not a prize: no requirements on any of them.
+	{ID: "slate", Kind: "board", Name: "Slate", Desc: "The dark cloth the game grew up on."},
+	{ID: "walnut", Kind: "board", Name: "Walnut", Desc: "Warm wood, like a board that gets used."},
+	{ID: "ivory", Kind: "board", Name: "Ivory", Desc: "Pale and bright, for tired eyes."},
+	{ID: "forest", Kind: "board", Name: "Forest", Desc: "Deep green felt, a card-room table."},
+	{ID: "ink", Kind: "board", Name: "Ink", Desc: "Near black, so the stones do the talking."},
 }
 
 // UnlockAll makes every profile see the whole catalog as unlocked. It is set
@@ -79,6 +86,7 @@ func (s *Server) handleProfileEquip(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 		Skin  string `json:"skin"`
 		Env   string `json:"env"`
+		Board string `json:"board"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request body")
@@ -89,7 +97,22 @@ func (s *Server) handleProfileEquip(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "unknown profile")
 		return
 	}
-	skin, env := p.EquippedSkin, p.EquippedEnv
+	skin, env, board := p.EquippedSkin, p.EquippedEnv, p.EquippedBoard
+	if board == "" {
+		board = DefaultBoard
+	}
+	if req.Board != "" {
+		it := itemByID(req.Board)
+		if it == nil || it.Kind != "board" {
+			writeErr(w, http.StatusBadRequest, "no such board")
+			return
+		}
+		if !isUnlocked(p, it) {
+			writeErr(w, http.StatusConflict, "that board is still locked")
+			return
+		}
+		board = it.ID
+	}
 	if req.Skin != "" {
 		it := itemByID(req.Skin)
 		if it == nil || it.Kind != "skin" {
@@ -114,11 +137,11 @@ func (s *Server) handleProfileEquip(w http.ResponseWriter, r *http.Request) {
 		}
 		env = it.ID
 	}
-	if err := s.st.UpdateProfileEquip(r.Context(), p.ID, skin, env); err != nil {
+	if err := s.st.UpdateProfileEquip(r.Context(), p.ID, skin, env, board); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not save")
 		return
 	}
-	p.EquippedSkin, p.EquippedEnv = skin, env
+	p.EquippedSkin, p.EquippedEnv, p.EquippedBoard = skin, env, board
 	writeJSON(w, http.StatusOK, toProfilePayload(p))
 }
 

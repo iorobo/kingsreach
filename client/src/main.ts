@@ -1,7 +1,7 @@
 import { ArcRotateCamera, Engine, GlowLayer, Matrix, Plane, PointerEventTypes, Scene, Vector3 } from "./babylon";
 import type { Mesh, PointerInfo, ShadowGenerator } from "./babylon";
 import { ApiError, api, hasPath } from "./api";
-import type { CatalogItem, GameState, MoveOption, Profile, Seat } from "./api";
+import type { BoardDto, CatalogItem, GameState, MoveOption, Profile, Seat } from "./api";
 import { BoardView } from "./board";
 import { DiceRoller } from "./dice";
 import { buildEnvironment } from "./environments";
@@ -39,6 +39,10 @@ class Kingsreach {
 
   private profile: Profile | null = null;
   private catalog: CatalogItem[] = [];
+  /** Kept so the board can be rebuilt when its finish changes. */
+  private boardDto: BoardDto | null = null;
+  private clockTimer = 0;
+  private rematchOffered = false;
 
   private state: GameState | null = null;
   private gameId = "";
@@ -95,9 +99,10 @@ class Kingsreach {
       leave: () => this.leaveToMenu(),
       resign: () => void this.resign(),
       focus: () => this.focusCamera(),
-      throwDie: () => void this.throwDie(),
+      rollDie: () => void this.rollDie(),
       toggleMusic: () => this.music.toggleMute(),
       equip: (id, kind) => void this.equip(id, kind),
+      rematch: () => void this.rematch(),
     });
 
     this.music.observe(() => this.ui.setMusic(this.music.isMuted, this.music.current, this.music.playlist));
@@ -117,8 +122,8 @@ class Kingsreach {
     for (;;) {
       try {
         this.ui.loadingText("Unrolling the cloth…");
-        const board = await api.board();
-        this.board.build(board);
+        this.boardDto = await api.board();
+        this.board.build(this.boardDto);
         break;
       } catch {
         this.ui.loadingText("Cannot reach the server — retrying…");
@@ -141,7 +146,10 @@ class Kingsreach {
     void api.geo().then((c) => c && this.ui.suggestCountry(c)).catch(() => {});
 
     await this.loadIdentity();
-    if (this.profile) this.applyEnvironment(this.profile.equippedEnv);
+    if (this.profile) {
+      this.applyEnvironment(this.profile.equippedEnv);
+      this.applyBoardFinish(this.profile.equippedBoard);
+    }
     this.ui.setData(this.profile, this.catalog);
 
     if (!this.profile) {
@@ -255,6 +263,18 @@ class Kingsreach {
     for (const m of this.casters) this.shadows?.addShadowCaster(m);
   }
 
+  /**
+   * Swaps the board finish. The colour is baked into the cloth material when
+   * the board is built, so changing it means rebuilding — cheap, and it keeps
+   * the build path single rather than having a second "recolour" path that
+   * can drift from it.
+   */
+  private applyBoardFinish(id: string): void {
+    if (!this.board.setBoardFinish(id) || !this.boardDto) return;
+    this.board.build(this.boardDto);
+    if (this.state) void this.board.sync(this.state, false);
+  }
+
   private registerCasters(meshes: Mesh[]): void {
     for (const m of meshes) {
       this.casters.push(m);
@@ -262,14 +282,20 @@ class Kingsreach {
     }
   }
 
-  private async equip(id: string, kind: "skin" | "env"): Promise<void> {
+  private async equip(id: string, kind: CatalogItem["kind"]): Promise<void> {
     if (!this.profile || this.busy) return;
     try {
-      this.profile = await api.equip(this.profile.token, kind === "skin" ? { skin: id } : { env: id });
+      const what = kind === "skin" ? { skin: id } : kind === "board" ? { board: id } : { env: id };
+      this.profile = await api.equip(this.profile.token, what);
       if (kind === "env") this.applyEnvironment(this.profile.equippedEnv);
+      if (kind === "board") this.applyBoardFinish(this.profile.equippedBoard);
       this.ui.setData(this.profile, this.catalog);
       this.ui.toast(
-        kind === "env" ? "The scenery shifts around you." : "Your host dons a new look for the next battle.",
+        kind === "env"
+          ? "The scenery shifts around you."
+          : kind === "board"
+            ? "A different cloth is laid out."
+            : "Your host dons a new look for the next battle.",
         true,
       );
     } catch (e) {
@@ -390,6 +416,27 @@ class Kingsreach {
     }
   }
 
+  /**
+   * Ask for another game against the same people. Whoever asks first makes the
+   * table; anyone asking afterwards is seated at it, so pressing this is both
+   * "offer" and "accept" depending on who got there first.
+   */
+  private async rematch(): Promise<void> {
+    if (!this.gameId || this.busy) return;
+    this.busy = true;
+    try {
+      const st = await api.rematch(this.gameId, this.token);
+      this.rematchOffered = false;
+      const waiting = st.status === "waiting";
+      this.enterGame(st);
+      if (waiting) this.ui.rematchWaiting();
+    } catch (e) {
+      this.ui.toast(errText(e));
+    } finally {
+      this.busy = false;
+    }
+  }
+
   /** Begin a table that never filled up; the computer takes what is left. */
   private async startEarly(): Promise<void> {
     if (!this.gameId || this.busy) return;
@@ -425,6 +472,7 @@ class Kingsreach {
   private enterGame(state: GameState): void {
     if (state.token) this.token = state.token;
     this.gameId = state.gameId;
+    this.rematchOffered = false;
     this.stopLobbyPolling();
     localStorage.setItem(STORE.game, this.gameId);
     localStorage.setItem(STORE.token, this.token);
@@ -441,6 +489,9 @@ class Kingsreach {
   private leaveToMenu(): void {
     this.stopPolling();
     this.stopLobbyPolling();
+    clearInterval(this.clockTimer);
+    this.clockTimer = 0;
+    this.rematchOffered = false;
     this.state = null;
     this.gameId = "";
     this.token = "";
@@ -523,14 +574,53 @@ class Kingsreach {
     this.ui.updateFromState(state, this.myTurn());
     await this.syncDicePhase(state);
 
+    this.syncClock(state);
+
     if (state.status === "finished") {
-      this.forgetGame();
       this.stopPolling();
       const title = this.resultTitle(state);
       this.ui.status(title);
       this.ui.showResult(title, REASONS[state.winReason] ?? state.winReason);
+      // Keep polling the finished game, quietly: that is how we hear about a
+      // rematch somebody else asked for. `forgetGame` would throw away the
+      // token we need to accept it.
+      this.watchForRematch();
       void this.refreshProfile();
     }
+  }
+
+  /** Ticks the visible countdown between polls, so it moves once a second. */
+  private syncClock(state: GameState): void {
+    clearInterval(this.clockTimer);
+    this.clockTimer = 0;
+    const mine = state.status === "active" && this.myTurn();
+    const deadline = state.deadline ?? "";
+    this.ui.setClock(deadline, mine);
+    if (!deadline || !mine) return;
+    this.clockTimer = window.setInterval(() => this.ui.setClock(deadline, true), 1000);
+  }
+
+  /**
+   * After a game ends, watch it for a rematch. Cheap — one poll every few
+   * seconds while somebody sits on the result screen — and it is what lets a
+   * rematch be an agreement rather than a link you have to send.
+   */
+  private watchForRematch(): void {
+    this.stopPolling();
+    this.pollTimer = window.setInterval(() => {
+      void (async () => {
+        if (!this.gameId || this.busy) return;
+        try {
+          const st = await api.getGame(this.gameId, this.token);
+          if (st.rematchId && !this.rematchOffered) {
+            this.rematchOffered = true;
+            this.ui.rematchOffered();
+          }
+        } catch {
+          this.stopPolling(); // the table has been swept; nothing to wait for
+        }
+      })();
+    }, 3000);
   }
 
   /**
@@ -561,7 +651,7 @@ class Kingsreach {
   }
 
   /** The player's throw: ask the server for a value, then land the die on it. */
-  async throwDie(): Promise<void> {
+  async rollDie(): Promise<void> {
     const st = this.state;
     if (!st || st.phase !== "roll" || !st.yourRoll || this.busy) return;
     if (!this.diceRoller.waiting) return;
@@ -571,7 +661,7 @@ class Kingsreach {
     this.busy = true;
     try {
       const res = await api.roll(this.gameId, this.token, seat);
-      await this.diceRoller.throwTo(res.rolled);
+      await this.diceRoller.rollTo(res.rolled);
       this.ui.toast(`${seatName(res.rolledSeat)} threw a ${res.rolled}`, true);
       await new Promise((r) => setTimeout(r, 600));
       this.diceRoller.clear();
@@ -687,7 +777,7 @@ class Kingsreach {
         this.scene.pointerY,
         (m) => !!(m.metadata as { die?: boolean } | undefined)?.die,
       );
-      if (die?.hit) void this.throwDie();
+      if (die?.hit) void this.rollDie();
       return;
     }
 

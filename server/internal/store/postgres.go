@@ -73,6 +73,7 @@ ALTER TABLE games ADD COLUMN IF NOT EXISTS host_name text NOT NULL DEFAULT '';
 ALTER TABLE games ADD COLUMN IF NOT EXISTS host_country text NOT NULL DEFAULT '';
 ALTER TABLE games ADD COLUMN IF NOT EXISTS house boolean NOT NULL DEFAULT false;
 ALTER TABLE games ADD COLUMN IF NOT EXISTS listed boolean NOT NULL DEFAULT true;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS rematch_id text NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS games_open_idx ON games(status, created_at DESC);
 -- Player identity.
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'guest';
@@ -80,6 +81,7 @@ ALTER TABLE profiles ADD COLUMN IF NOT EXISTS name text NOT NULL DEFAULT '';
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar text NOT NULL DEFAULT '';
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS country text NOT NULL DEFAULT '';
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS steam_id text NOT NULL DEFAULT '';
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_board text NOT NULL DEFAULT 'slate';
 CREATE UNIQUE INDEX IF NOT EXISTS profiles_steam_idx ON profiles(steam_id) WHERE steam_id <> '';
 `
 
@@ -132,12 +134,12 @@ func (p *Postgres) Create(ctx context.Context, rec *GameRecord) error {
 	_, err = p.pool.Exec(ctx, `
 		INSERT INTO games (id, code, mode, status, players, seats, state, version,
 		                   name, password_hash, password_salt, host_name, host_country, house, listed,
-		                   created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+		                   rematch_id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
 		rec.ID, strings.ToUpper(rec.Code), rec.Mode, rec.Status,
 		rec.Players, seatsJSON, stateJSON, rec.Version,
 		rec.Name, rec.PasswordHash, rec.PasswordSalt, rec.HostName, rec.HostCountry, rec.House, rec.Listed,
-		rec.CreatedAt, rec.UpdatedAt)
+		rec.RematchID, rec.CreatedAt, rec.UpdatedAt)
 	return err
 }
 
@@ -200,7 +202,7 @@ func (p *Postgres) scanOne(row pgx.Row) (*GameRecord, error) {
 		&legacyTokenWest, &legacyTokenEast, &legacyProfileWest, &legacyProfileEast,
 		&legacySkinWest, &legacySkinEast,
 		&rec.Name, &rec.PasswordHash, &rec.PasswordSalt, &rec.HostName, &rec.HostCountry,
-		&rec.House, &rec.Listed,
+		&rec.House, &rec.Listed, &rec.RematchID,
 		&stateJSON, &rec.Version, &rec.CreatedAt, &rec.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -230,7 +232,7 @@ func (p *Postgres) scanOne(row pgx.Row) (*GameRecord, error) {
 
 const selectCols = `id, code, mode, status, players, seats,
 	token_west, token_east, profile_west, profile_east, skin_west, skin_east,
-	name, password_hash, password_salt, host_name, host_country, house, listed,
+	name, password_hash, password_salt, host_name, host_country, house, listed, rematch_id,
 	state, version, created_at, updated_at`
 
 func (p *Postgres) Get(ctx context.Context, id string) (*GameRecord, error) {
@@ -253,9 +255,9 @@ func (p *Postgres) Update(ctx context.Context, rec *GameRecord) error {
 	rec.UpdatedAt = time.Now().UTC()
 	tag, err := p.pool.Exec(ctx, `
 		UPDATE games SET status=$2, seats=$3, state=$4, version=$5, updated_at=$6,
-		       name=$7, host_name=$8, host_country=$9 WHERE id=$1`,
+		       name=$7, host_name=$8, host_country=$9, rematch_id=$10 WHERE id=$1`,
 		rec.ID, rec.Status, seatsJSON, stateJSON, rec.Version, rec.UpdatedAt,
-		rec.Name, rec.HostName, rec.HostCountry)
+		rec.Name, rec.HostName, rec.HostCountry, rec.RematchID)
 	if err != nil {
 		return err
 	}
@@ -266,13 +268,13 @@ func (p *Postgres) Update(ctx context.Context, rec *GameRecord) error {
 }
 
 const profileCols = `id, token, kind, name, avatar, country, steam_id,
-	games_played, wins, equipped_skin, equipped_env, created_at, updated_at`
+	games_played, wins, equipped_skin, equipped_env, equipped_board, created_at, updated_at`
 
 func scanProfile(row pgx.Row) (*Profile, error) {
 	prof := &Profile{}
 	err := row.Scan(&prof.ID, &prof.Token, &prof.Kind, &prof.Name, &prof.Avatar, &prof.Country,
 		&prof.SteamID, &prof.GamesPlayed, &prof.Wins,
-		&prof.EquippedSkin, &prof.EquippedEnv, &prof.CreatedAt, &prof.UpdatedAt)
+		&prof.EquippedSkin, &prof.EquippedEnv, &prof.EquippedBoard, &prof.CreatedAt, &prof.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -287,10 +289,10 @@ func (p *Postgres) CreateProfile(ctx context.Context, prof *Profile) error {
 	prof.CreatedAt, prof.UpdatedAt = now, now
 	_, err := p.pool.Exec(ctx, `
 		INSERT INTO profiles (id, token, kind, name, avatar, country, steam_id,
-		                      games_played, wins, equipped_skin, equipped_env, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+		                      games_played, wins, equipped_skin, equipped_env, equipped_board, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
 		prof.ID, prof.Token, prof.Kind, prof.Name, prof.Avatar, prof.Country, prof.SteamID,
-		prof.GamesPlayed, prof.Wins, prof.EquippedSkin, prof.EquippedEnv, prof.CreatedAt, prof.UpdatedAt)
+		prof.GamesPlayed, prof.Wins, prof.EquippedSkin, prof.EquippedEnv, prof.EquippedBoard, prof.CreatedAt, prof.UpdatedAt)
 	return err
 }
 
@@ -318,10 +320,11 @@ func (p *Postgres) UpdateProfileIdentity(ctx context.Context, prof *Profile) err
 	return nil
 }
 
-func (p *Postgres) UpdateProfileEquip(ctx context.Context, id, skin, env string) error {
+func (p *Postgres) UpdateProfileEquip(ctx context.Context, id, skin, env, board string) error {
 	tag, err := p.pool.Exec(ctx, `
-		UPDATE profiles SET equipped_skin=$2, equipped_env=$3, updated_at=now() WHERE id=$1`,
-		id, skin, env)
+		UPDATE profiles SET equipped_skin=$2, equipped_env=$3, equipped_board=$4, updated_at=now()
+		WHERE id=$1`,
+		id, skin, env, board)
 	if err != nil {
 		return err
 	}
@@ -347,7 +350,7 @@ func (p *Postgres) BumpProfileStats(ctx context.Context, id string, win bool) er
 func (p *Postgres) Leaderboard(ctx context.Context, minWins, limit int) ([]*Profile, error) {
 	rows, err := p.pool.Query(ctx, `
 		SELECT id, token, kind, name, avatar, country, steam_id,
-		       games_played, wins, equipped_skin, equipped_env, created_at, updated_at
+		       games_played, wins, equipped_skin, equipped_env, equipped_board, created_at, updated_at
 		FROM profiles
 		WHERE kind = 'steam' AND wins >= $1
 		ORDER BY wins DESC, games_played ASC, name ASC
@@ -361,7 +364,7 @@ func (p *Postgres) Leaderboard(ctx context.Context, minWins, limit int) ([]*Prof
 		p := &Profile{}
 		var steamID *string
 		if err := rows.Scan(&p.ID, &p.Token, &p.Kind, &p.Name, &p.Avatar, &p.Country, &steamID,
-			&p.GamesPlayed, &p.Wins, &p.EquippedSkin, &p.EquippedEnv, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			&p.GamesPlayed, &p.Wins, &p.EquippedSkin, &p.EquippedEnv, &p.EquippedBoard, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if steamID != nil {

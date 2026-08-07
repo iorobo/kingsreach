@@ -127,7 +127,7 @@ export class DiceRoller {
   }
 
   /** Tumbles the waiting die and settles it on `value`. */
-  async throwTo(value: number, height = 3.2): Promise<void> {
+  async rollTo(value: number, height = 3.2): Promise<void> {
     if (!this.held) return;
     const { node } = this.held;
     this.stopIdle();

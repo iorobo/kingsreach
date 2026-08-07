@@ -48,6 +48,11 @@ type Server struct {
 	steam *SteamAuth
 	// Country guesses per address, so we ask at most once per player.
 	geo *geoCache
+	// How long bots pause and how long people get to act.
+	timings Timings
+	think   *thinking
+	// now is the clock, swappable so tests need not sleep.
+	now func() time.Time
 	// BotLobbies keeps computer-hosted tables open in the browser.
 	BotLobbies bool
 	seedMu     sync.Mutex
@@ -59,6 +64,7 @@ func New(st store.Store, staticDir string) *Server {
 	s := &Server{
 		board: game.BuildBoard(), st: st, staticDir: staticDir,
 		mux: http.NewServeMux(), BotLobbies: true, geo: newGeoCache(),
+		timings: TimingsFromEnv(), think: newThinking(), now: time.Now,
 	}
 
 	type boardOut struct {
@@ -87,6 +93,7 @@ func New(st store.Store, staticDir string) *Server {
 	s.mux.HandleFunc("POST /api/games/{id}/move", s.handleMove)
 	s.mux.HandleFunc("POST /api/games/{id}/roll", s.handleRoll)
 	s.mux.HandleFunc("POST /api/games/{id}/resign", s.handleResign)
+	s.mux.HandleFunc("POST /api/games/{id}/rematch", s.handleRematch)
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("/", s.handleStatic)
 	return s
@@ -178,6 +185,9 @@ type clientSeat struct {
 	Name    string `json:"name,omitempty"`
 	Avatar  string `json:"avatar,omitempty"`
 	Country string `json:"country,omitempty"`
+	Rank    int    `json:"rank,omitempty"`  // hall-of-champions place, 0 = unranked
+	Bot     bool   `json:"bot,omitempty"`   // played by the computer
+	Level   string `json:"level,omitempty"` // that computer player's difficulty
 }
 
 type clientState struct {
@@ -201,6 +211,13 @@ type clientState struct {
 	YourRoll  bool               `json:"yourRoll"`          // may you throw right now?
 	Pieces    []clientPiece      `json:"pieces"`
 	LastMove  *clientMove        `json:"lastMove"`
+	// Deadline is when whoever is on the move runs out of time, as RFC 3339.
+	// Empty when no clock is running. The client counts down from this rather
+	// than from a duration, so a slow poll cannot make the clock jump.
+	Deadline string `json:"deadline,omitempty"`
+	// RematchID appears on a finished game once somebody has asked for another
+	// go, which is how the others find out without being pushed anything.
+	RematchID string `json:"rematchId,omitempty"`
 }
 
 // stateWithRoll adds the die just thrown, so the client animates that value.
@@ -224,7 +241,10 @@ func toClientState(rec *store.GameRecord, token string) *clientState {
 		Phase: st.Phase, Players: rec.Players, You: you, Turn: string(st.Turn),
 		Winner: string(st.Winner), WinReason: st.WinReason,
 		Version: rec.Version, Ply: st.Ply, Capturing: st.CapturesAllowed(),
-		Dice: st.Dice,
+		Dice: st.Dice, RematchID: rec.RematchID,
+	}
+	if !st.TurnDeadline.IsZero() {
+		out.Deadline = st.TurnDeadline.UTC().Format(time.RFC3339)
 	}
 	for _, seat := range st.Pending {
 		out.Pending = append(out.Pending, string(seat))
@@ -237,6 +257,7 @@ func toClientState(rec *store.GameRecord, token string) *clientState {
 			Seat: string(seat.Seat), Skin: seat.Skin, Taken: seat.Taken,
 			You: seat.Taken && seat.Token == token, Out: st.IsOut(seat.Seat),
 			Name: seat.Name, Avatar: seat.Avatar, Country: seat.Country,
+			Rank: seat.Rank, Bot: seat.Bot, Level: seat.Difficulty,
 		}
 		for _, k := range st.Out {
 			if k.Seat == seat.Seat {

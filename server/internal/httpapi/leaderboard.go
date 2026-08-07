@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 )
 
@@ -14,6 +15,29 @@ import (
 const LeaderboardMinWins = 20
 
 const leaderboardLimit = 100
+
+// rankOf is a player's place in the hall of champions, or 0 for everyone else.
+// Snapshotted onto a seat when they sit down rather than resolved per poll —
+// a leaderboard query on every state build would be absurd, and a rank that
+// shifts mid-game changes nothing about the game.
+func (s *Server) rankOf(ctx context.Context, profileID string) int {
+	if profileID == "" {
+		return 0
+	}
+	top, err := s.st.Leaderboard(ctx, LeaderboardMinWins, crownedPlaces)
+	if err != nil {
+		return 0
+	}
+	for i, p := range top {
+		if p.ID == profileID {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// crownedPlaces is how far down the board a crown is worth wearing.
+const crownedPlaces = 3
 
 type rankEntry struct {
 	// Absent rather than zero for someone not on the board — a rank of 0 is

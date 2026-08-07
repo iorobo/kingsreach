@@ -72,6 +72,7 @@ func main() {
 		api.BotLobbies = false
 		log.Println("computer-hosted tables disabled")
 	}
+	api.LogTimings()
 	go api.RunBots(ctx)
 
 	srv := &http.Server{

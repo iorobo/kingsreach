@@ -12,6 +12,27 @@ function tiled(tex: DynamicTexture): DynamicTexture {
 // Shared palette (matches the embroidered cloth from the physical set) and
 // small factory helpers. Everything is generated at runtime — no assets.
 
+/**
+ * Board finishes. A preference, not a prize — every one of these is available
+ * from the start, so the ids here have to match the "board" entries in the
+ * server's catalog.
+ */
+export const BOARDS: Record<string, { cloth: string; edge: string }> = {
+  slate: { cloth: "#2A2624", edge: "#1A1614" },
+  walnut: { cloth: "#4A3325", edge: "#2E1E14" },
+  ivory: { cloth: "#CFC4AC", edge: "#9C907A" },
+  forest: { cloth: "#1F3A2C", edge: "#132419" },
+  ink: { cloth: "#141317", edge: "#08080A" },
+};
+
+export const DEFAULT_BOARD = "slate";
+
+/** The two colours of a board finish, falling back to the default. */
+export function boardColours(id: string): { cloth: Color3; edge: Color3 } {
+  const b = BOARDS[id] ?? BOARDS[DEFAULT_BOARD]!;
+  return { cloth: Color3.FromHexString(b.cloth), edge: Color3.FromHexString(b.edge) };
+}
+
 export const C = {
   cloth: Color3.FromHexString("#2A2624"),
   clothEdge: Color3.FromHexString("#1A1614"),

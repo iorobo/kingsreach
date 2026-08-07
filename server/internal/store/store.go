@@ -24,6 +24,12 @@ type Seat struct {
 	Name    string     `json:"name,omitempty"`
 	Avatar  string     `json:"avatar,omitempty"`
 	Country string     `json:"country,omitempty"`
+	// Difficulty is how hard this computer player tries; empty for people.
+	Difficulty string `json:"difficulty,omitempty"`
+	// Rank is the player's leaderboard place, snapshotted when they sat down.
+	// Resolving it per poll would mean a leaderboard query on every state
+	// build, and a rank that shifts mid-game changes nothing. 0 = unranked.
+	Rank int `json:"rank,omitempty"`
 }
 
 // HasBot reports whether any seat is computer-played.
@@ -54,6 +60,7 @@ type GameRecord struct {
 	HostCountry  string // ISO-3166 alpha-2, "" when the host did not say
 	House        bool   // a table the server keeps open, not a player's
 	Listed       bool   // shows in the lobby browser
+	RematchID    string // the table this one's players moved on to, once agreed
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -126,19 +133,20 @@ func (g *GameRecord) SkinOf(seat game.Color) string {
 // Kind is "steam" for a verified Steam sign-in — only those keep progress —
 // or "guest" for someone who just typed a name.
 type Profile struct {
-	ID           string
-	Token        string
-	Kind         string // "steam" | "guest"
-	Name         string
-	Avatar       string // URL, from Steam
-	Country      string // ISO-3166 alpha-2
-	SteamID      string
-	GamesPlayed  int
-	Wins         int
-	EquippedSkin string
-	EquippedEnv  string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID            string
+	Token         string
+	Kind          string // "steam" | "guest"
+	Name          string
+	Avatar        string // URL, from Steam
+	Country       string // ISO-3166 alpha-2
+	SteamID       string
+	GamesPlayed   int
+	Wins          int
+	EquippedSkin  string
+	EquippedEnv   string
+	EquippedBoard string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // Persistent reports whether this identity keeps its progress between visits.
@@ -163,7 +171,7 @@ type Store interface {
 	GetProfileByToken(ctx context.Context, token string) (*Profile, error)
 	GetProfileBySteamID(ctx context.Context, steamID string) (*Profile, error)
 	UpdateProfileIdentity(ctx context.Context, p *Profile) error
-	UpdateProfileEquip(ctx context.Context, id, skin, env string) error
+	UpdateProfileEquip(ctx context.Context, id, skin, env, board string) error
 	BumpProfileStats(ctx context.Context, id string, win bool) error
 	// Leaderboard returns signed-in players with at least minWins victories,
 	// best first. Guests are never listed — they keep no progress to rank.

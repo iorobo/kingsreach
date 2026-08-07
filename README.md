@@ -53,9 +53,23 @@ and who has been knocked out.
 
 Nobody may be struck during the opening round — everyone gets one safe move first.
 
+**You have 150 seconds** to roll or move. The countdown sits in the top bar on your turn and turns
+red near the end; run it out and you forfeit your seat, and the game goes to whoever is left — the
+computer included. Offline games have no clock. Change it with `KINGSREACH_MOVE_SECONDS`.
+
+The computer plays at **easy, medium or hard**, picked at random when it sits down, and pauses
+before moving so it reads as an opponent rather than a script. Hard searches three plies with
+alpha–beta and wins about ten games in ten against easy; easy takes the odd bad move and sometimes
+misses a capture outright. Beating any of them counts towards the hall of champions.
+
+When a game ends, **Rematch** sets the same table up again. Against the computer it starts at once;
+against a person it waits until they press it too.
+
 Online victories unlock piece skins (Royal Gold, Crystal Court, Runestones) and 3D environments
-(Medieval Fair, Bombsite B, Boardgame Store, Streetside Café). Open **Collection** in the menu to
-equip them. Progress is kept for players who signed in through Steam; guests play the same game
+(Medieval Fair, Bombsite B, Boardgame Store, Streetside Café). Board finishes (Slate, Walnut,
+Ivory, Forest, Ink) need nothing — they are a preference, not a prize. Open **Collection** in the
+menu to equip any of it. Reach the top three of the hall of champions and your king wears a gold
+crown at the table, biggest at number one. Progress is kept for players who signed in through Steam; guests play the same game
 but keep nothing, which the menu says plainly rather than letting anyone find out the hard way.
 
 Want everything available while working on the game? Start the server with
@@ -114,6 +128,22 @@ The image builds the client and the server itself, so nothing generated needs to
    PUBLIC_URL=https://your-domain.example
    TRUST_PROXY=1
    ```
+
+   Optional, all with sensible defaults:
+
+   | Variable | Default | What it does |
+   |---|---|---|
+   | `KINGSREACH_MOVE_SECONDS` | `150` | How long a player has to roll or move before forfeiting. `0` turns the clock off. |
+   | `KINGSREACH_THINK_EASY` | `600-1400` | How long an easy computer player pauses before moving, in milliseconds, `min-max`. |
+   | `KINGSREACH_THINK_MEDIUM` | `900-2200` | …a medium one. |
+   | `KINGSREACH_THINK_HARD` | `1400-3500` | …a hard one. `0-0` makes bots answer instantly. |
+   | `KINGSREACH_UNLOCK_ALL` | off | Every skin, board and place unlocked, for a preview deployment. |
+   | `KINGSREACH_BOT_LOBBIES` | on | Set `0` to stop the server keeping its own tables open. |
+   | `GEOIP_URL` | unset | Country lookup for IPv6 addresses; see below. |
+
+   A malformed timing warns in the log and falls back to its default rather than
+   refusing to boot. The values in use are printed at startup, so a typo shows
+   up immediately instead of as odd behaviour hours later.
 
    (DB host = the name of the Postgres service on the internal network. `PUBLIC_URL` is the
    address players reach the game on; Steam sends them back to it after signing in, and without

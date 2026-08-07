@@ -210,6 +210,7 @@ web/                       ← build output (generated, git-ignored)
 | `POST /api/games/{id}/move` | `{"token","from","to"}` | new state (or `409` + error for illegal moves) |
 | `POST /api/games/{id}/roll` | `{"token","seat"?}` | state + `{rolledSeat, rolled}` — throws one die for that seat; `403` if it is not your throw |
 | `POST /api/games/{id}/resign` | `{"token"}` | new state |
+| `POST /api/games/{id}/rematch` | `{"token"}` | `{state, token}` for a new table with the same players. Idempotent: the first caller creates it, later callers are seated at the same one, and the finished game carries `rematchId` so the others hear about it through their poll |
 | `GET /healthz` | – | `{"ok":true,"store":"postgres"\|"memory"}` |
 
 State payload (`you` is your seat, or `"all"` when one client runs the table):
@@ -224,6 +225,7 @@ State payload (`you` is your seat, or `"all"` when one client runs the table):
            {"seat":"southwest","skin":"royal","taken":true,"you":false,
             "out":true,"cause":"king-captured"}, …],
   "you":"west","turn":"east","winner":"","winReason":"",
+  "deadline":"2026-08-07T14:45:39Z","rematchId":"",
   "phase":"play","version":7,"ply":6,"capturing":true,
   "dice":[[{"seat":"west","value":6},{"seat":"east","value":6}],
           [{"seat":"west","value":4},{"seat":"east","value":2}]],
@@ -406,7 +408,49 @@ target, since they keep no progress to rank.
 Self-play is still worth nothing: one profile in two seats is not a contest. Offline records
 nothing at all.
 
-### 3.7 Engine invariants (unit-tested)
+### 3.7 The computer player
+
+Three levels (`easy`/`medium`/`hard`), assigned at random when a bot takes a seat and carried on
+`Seat.Difficulty`. All of them share one evaluation — material, king distance to the Throne, king
+safety — and differ in how far they look and how much noise they add.
+
+The first version scored one ply and took the best move. It checked whether its own *king* was
+left hanging but never whether **the piece it had just moved** was, so it walked into every trade.
+`hangs` is that missing term, and it is worth more than all the positional tuning together.
+
+Hard searches three plies with alpha–beta. At three or four players it runs **paranoid** — every
+rival treated as one opponent picking the reply that hurts most — which is the honest cheap choice
+for a multi-player game.
+
+**Wins are decayed by distance** (`decay`, `plyCost`). Without it, "step onto the Throne" and "step
+*next* to the Throne and take it next turn" both score a win, the tie falls to the randomness, and
+the bot dawdles in front of an open goal. This was caught by `TestBotTakesTheThrone` and is exactly
+the kind of thing a search gets wrong silently.
+
+`strength_test.go` plays the levels against each other and reports the score, so "the AI is bad" is
+answerable with a number. At the time of writing: hard 10–0 over easy, medium 10–0.
+
+Bots pause before moving (`clocks.go`), longer when a capture is on the table. The ranges are env
+vars — see the README table — so a deployment can tune the feel without a rebuild, and tests set
+`0-0` rather than waiting on theatre.
+
+### 3.8 The move clock
+
+150 seconds to roll or move, or you forfeit the seat. Enforced in the server tick rather than on
+request, or closing a laptop would stall the table indefinitely — note that tick used to skip games
+without a bot, which is precisely the human-versus-human case that needs this most.
+
+Running out is a **knockout**, reusing what resignation already does: stones stay on the board as
+obstacles, and the last player standing wins. That gives the right answer at two players (the
+opponent wins) *and* at four, where "the opponent" is not one person. The cause is its own
+(`OutTimedOut`), because walking away and giving up are different things to have next to your name.
+
+The deadline lives in the state and reaches the client, which counts down from it — a clock the
+player cannot see is a trap, and rendering from the deadline means a slow poll cannot make the
+numbers jump. Bots are exempt; so is offline, where arming it would show a countdown that nothing
+enforces.
+
+### 3.9 Engine invariants (unit-tested)
 
 - Board: 55 nodes, 78 edges, exactly 6 gold edges, Throne degree 6, kings start at `±8,0`.
 - Exact-step DFS: a 2 can never "bounce" back to its start; blocked first steps ⇒ no moves.
@@ -459,6 +503,16 @@ nothing at all.
   Collection screen renders the credits from the same arrays that declare the assets, and they
   cannot drift out of sync with what actually ships. A complete credit is four things: title,
   author, licence, source. Adding an asset means adding a row.
+- **Crystal Court's pips take the contrast colour**, like every other skin. They used to take the
+  seat's own hue — on a translucent, glowing gem *of that hue*, which made the piece's value
+  unreadable. Unlit, so the glow cannot wash them out again.
+- **Nothing in an environment may sit in front of the board.** The café pendants were placed on the
+  Z axis because "players look along the X axis" — true when the game seated two. `fadeWhenInTheWay`
+  answers it properly for any seat count and any orbit: follow the ray from the eye *through* the
+  prop and see whether it lands on the board beyond it. Two cheaper tests are both wrong, and both
+  were tried: the line to the board's *centre* misses a lamp in front of the far edge, and a sphere
+  around the board hides the lamps almost always, because a sphere that wide also reaches up to
+  where they hang.
 - **Strikes look and behave differently from ordinary moves.** `GET .../moves` returns `captures`
   (the victim's piece id) alongside each destination, so the client can mark a strike with a red
   ring *around* the stone rather than a teal disc under it. Two details make it legible: the ring

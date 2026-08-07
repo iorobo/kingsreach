@@ -17,6 +17,14 @@ const SKIN_SWATCH: Record<string, [string, string]> = {
   crystal: ["#5FE3D6", "#F080BE"],
   rune: ["#4A4A48", "#5C6250"],
 };
+// Board finishes, mirroring BOARDS in theme.ts.
+const BOARD_SWATCH: Record<string, [string, string]> = {
+  slate: ["#2A2624", "#1A1614"],
+  walnut: ["#4A3325", "#2E1E14"],
+  ivory: ["#CFC4AC", "#9C907A"],
+  forest: ["#1F3A2C", "#132419"],
+  ink: ["#141317", "#08080A"],
+};
 const ENV_SWATCH: Record<string, [string, string]> = {
   picnic: ["#5E8C4A", "#b82c37"],
   fair: ["#A63A3A", "#FFB870"],
@@ -47,9 +55,10 @@ export interface UiHandlers {
   leave(): void;
   resign(): void;
   focus(): void;
-  throwDie(): void;
+  rollDie(): void;
   toggleMusic(): void;
-  equip(id: string, kind: "skin" | "env"): void;
+  equip(id: string, kind: CatalogItem["kind"]): void;
+  rematch(): void;
 }
 
 /** Why a seat dropped out, for the seat list. */
@@ -115,8 +124,9 @@ export class Ui {
     $("btn-cancel").onclick = () => h.leave();
     $("btn-leave").onclick = () => h.leave();
     $("btn-back").onclick = () => h.leave();
+    $("btn-rematch").onclick = () => h.rematch();
     $("btn-focus").onclick = () => h.focus();
-    $("btn-throw").onclick = () => h.throwDie();
+    $("btn-throw").onclick = () => h.rollDie();
     $("btn-resign").onclick = () => this.onResign();
     $("btn-cancel-flag").onclick = () => $("flagpicker").classList.add("hidden");
     $("btn-save-flag").onclick = () => {
@@ -642,7 +652,50 @@ export class Ui {
   showResult(title: string, reason: string): void {
     $("result-title").textContent = title;
     $("result-reason").textContent = reason;
+    $("btn-rematch").classList.remove("hidden");
+    ($("btn-rematch") as HTMLButtonElement).disabled = false;
+    $("btn-rematch").textContent = "Rematch";
+    $("rematch-note").classList.add("hidden");
     $("result").classList.remove("hidden");
+  }
+
+  /** Somebody at the table has asked for another game; say so. */
+  rematchOffered(): void {
+    const btn = $("btn-rematch");
+    btn.textContent = "Join the rematch";
+    btn.classList.add("primary");
+    const note = $("rematch-note");
+    note.textContent = "Your opponent wants another game.";
+    note.classList.remove("hidden");
+  }
+
+  /** We asked first and are waiting for the others to follow. */
+  rematchWaiting(): void {
+    ($("btn-rematch") as HTMLButtonElement).disabled = true;
+    $("btn-rematch").textContent = "Waiting…";
+    const note = $("rematch-note");
+    note.textContent = "Waiting for the other player to accept.";
+    note.classList.remove("hidden");
+  }
+
+  /**
+   * The move clock. Rendered from the deadline rather than a countdown we hold
+   * ourselves, so a slow poll cannot make the numbers jump — and shown only
+   * while it is actually your move, because a clock ticking on somebody else's
+   * turn just makes people anxious.
+   */
+  setClock(deadline: string, yours: boolean): void {
+    const el = $("clock");
+    if (!deadline || !yours) {
+      el.classList.add("hidden");
+      return;
+    }
+    const left = Math.max(0, Math.round((Date.parse(deadline) - Date.now()) / 1000));
+    el.classList.remove("hidden");
+    el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+    el.classList.toggle("urgent", left <= 30);
+    el.classList.toggle("blink", left <= 10);
+    el.title = "Move before this runs out, or you forfeit the game";
   }
 
   updateFromState(state: GameState, myTurn: boolean): void {
@@ -657,8 +710,8 @@ export class Ui {
       const waiting = (state.pending ?? []).map((s) => seatName(s));
       this.status(
         state.yourRoll
-          ? `Throw for the opening move — click the die (${waiting[0] ?? ""})`
-          : `Waiting for ${waiting.join(", ")} to throw…`,
+          ? `Roll for the opening move — click the die (${waiting[0] ?? ""})`
+          : `Waiting for ${waiting.join(", ")} to roll…`,
       );
     } else if (state.status === "active") {
       const opening = !state.capturing ? " · opening round, no strikes" : "";
@@ -720,6 +773,8 @@ export class Ui {
         : seat.name
           ? `${seat.name} · ${info.label}`
           : `${info.label} · ${info.colourName}`;
+      // Worth knowing which computer you are up against.
+      if (seat.bot && seat.level) who.title = `Computer player · ${seat.level}`;
 
       const tag = document.createElement("div");
       tag.className = seat.out ? "tag" : "lost";
@@ -727,7 +782,7 @@ export class Ui {
       if (seat.out) tag.textContent = OUT_CAUSE[seat.cause ?? ""] ?? "out";
       else if (throwing) {
         tag.className = "tag";
-        tag.textContent = "to throw";
+        tag.textContent = "to roll";
         row.classList.add("turn");
       } else if (state.phase === "play" && state.status === "active" && state.turn === seat.seat) {
         tag.className = "tag";
@@ -788,7 +843,7 @@ export class Ui {
     const p = this.profile;
     this.refreshStats();
 
-    const section = (label: string, kind: "skin" | "env") => {
+    const section = (label: string, kind: CatalogItem["kind"]) => {
       const head = document.createElement("div");
       head.className = "section";
       head.textContent = label;
@@ -798,6 +853,7 @@ export class Ui {
       }
     };
     section("PIECE SKINS", "skin");
+    section("BOARDS", "board");
     section("ENVIRONMENTS", "env");
   }
 
@@ -806,12 +862,15 @@ export class Ui {
     const equipped =
       !!profile &&
       ((item.kind === "skin" && profile.equippedSkin === item.id) ||
-        (item.kind === "env" && profile.equippedEnv === item.id));
+        (item.kind === "env" && profile.equippedEnv === item.id) ||
+        (item.kind === "board" && profile.equippedBoard === item.id));
 
     const row = document.createElement("div");
     row.className = "item" + (unlocked ? "" : " locked");
 
-    const colors = (item.kind === "skin" ? SKIN_SWATCH : ENV_SWATCH)[item.id] ?? ["#555", "#888"];
+    const swatches =
+      item.kind === "skin" ? SKIN_SWATCH : item.kind === "board" ? BOARD_SWATCH : ENV_SWATCH;
+    const colors = swatches[item.id] ?? ["#555", "#888"];
     const swatch = document.createElement("div");
     swatch.className = "swatch";
     swatch.style.background = `linear-gradient(135deg, ${colors[0]} 0 50%, ${colors[1]} 50% 100%)`;

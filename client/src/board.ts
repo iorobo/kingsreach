@@ -1,6 +1,6 @@
 import { MeshBuilder, TransformNode, Vector3 } from "./babylon";
 import type { GlowLayer, Mesh, Scene } from "./babylon";
-import { C, disc, hexPrism, mat, ring } from "./theme";
+import { C, DEFAULT_BOARD, boardColours, disc, hexPrism, mat, ring } from "./theme";
 import { PIECE_H, buildPiece } from "./skins";
 import { seatInfo } from "./seats";
 import type { BoardDto, GameState, MoveOption, PieceDto, Seat } from "./api";
@@ -50,10 +50,11 @@ class PieceView {
     public node: string,
     skin: string,
     position: Vector3,
+    rank = 0,
   ) {
     this.root = new TransformNode("piece-" + id, scene);
     this.root.position = position.clone();
-    this.meshes = buildPiece(scene, this.root as unknown as Mesh, skin, owner, value);
+    this.meshes = buildPiece(scene, this.root as unknown as Mesh, skin, owner, value, rank);
     for (const m of this.meshes) {
       m.metadata = { pieceId: id };
       m.receiveShadows = true;
@@ -134,6 +135,8 @@ export class BoardView {
   private graveRoot!: TransformNode;
   private readonly graves = new Map<string, TransformNode>();
   private skins = new Map<Seat, string>();
+  private ranks = new Map<Seat, number>();
+  private boardId = DEFAULT_BOARD;
   private pulse = 0;
 
   /** Called whenever meshes appear so the caller can register shadow casters. */
@@ -152,12 +155,13 @@ export class BoardView {
 
     const created: Mesh[] = [];
 
-    const seam = hexPrism(this.scene, "cloth-seam", 5.62, 0.2, mat(this.scene, "seam", C.clothEdge, { roughness: 0.9 }));
+    const finish = boardColours(this.boardId);
+    const seam = hexPrism(this.scene, "cloth-seam", 5.62, 0.2, mat(this.scene, "seam", finish.edge, { roughness: 0.9 }));
     seam.parent = root;
     seam.position.y = -0.115;
     seam.receiveShadows = true;
 
-    const cloth = hexPrism(this.scene, "cloth", 5.4, 0.16, mat(this.scene, "cloth", C.cloth, { roughness: 0.92 }));
+    const cloth = hexPrism(this.scene, "cloth", 5.4, 0.16, mat(this.scene, "cloth", finish.cloth, { roughness: 0.92 }));
     cloth.parent = root;
     cloth.position.y = -0.08;
     cloth.receiveShadows = true;
@@ -248,13 +252,34 @@ export class BoardView {
     return undefined;
   }
 
-  /** Applies each seat's chosen skin, rebuilding pieces when one changes. */
+  /**
+   * Picks the board finish. Returns true when it changed, so the caller knows
+   * the board has to be rebuilt — the colour is baked into the cloth material
+   * at build time rather than being swapped live.
+   */
+  setBoardFinish(id: string): boolean {
+    const next = id || DEFAULT_BOARD;
+    if (next === this.boardId) return false;
+    this.boardId = next;
+    return true;
+  }
+
+  /**
+   * Applies each seat's skin and leaderboard rank, rebuilding pieces when
+   * either changes. Rank is here rather than on the piece because it decides
+   * what the king's crown looks like, which is built once with the mesh.
+   */
   setSkins(state: GameState): void {
     let changed = false;
     for (const seat of state.seats) {
       const skin = seat.skin || "clay";
       if (this.skins.get(seat.seat) !== skin) {
         this.skins.set(seat.seat, skin);
+        changed = true;
+      }
+      const rank = seat.rank ?? 0;
+      if ((this.ranks.get(seat.seat) ?? 0) !== rank) {
+        this.ranks.set(seat.seat, rank);
         changed = true;
       }
     }
@@ -363,7 +388,14 @@ export class BoardView {
     slab.parent = root;
     slab.position.y = 0.02;
     slab.isPickable = false;
-    const parts = buildPiece(this.scene, root as unknown as Mesh, this.skinFor(dto.owner), dto.owner, dto.value);
+    const parts = buildPiece(
+      this.scene,
+      root as unknown as Mesh,
+      this.skinFor(dto.owner),
+      dto.owner,
+      dto.value,
+      this.ranks.get(dto.owner) ?? 0,
+    );
     for (const m of parts) {
       m.isPickable = false; // set-aside stones are scenery, not targets
       m.position.y += 0.04;
@@ -390,6 +422,7 @@ export class BoardView {
       dto.node,
       this.skinFor(dto.owner),
       this.nodeWorld(dto.node),
+      this.ranks.get(dto.owner) ?? 0,
     );
     pv.root.parent = this.pieceRoot;
     this.pieces.set(dto.id, pv);
@@ -408,6 +441,7 @@ export class BoardView {
     this.pieces.clear();
     this.clearGraves();
     this.skins.clear();
+    this.ranks.clear();
     this.clearHints();
     this.clearTrail();
     this.select(null);

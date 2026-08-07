@@ -133,6 +133,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		if mine {
 			st.Token, st.Profile = token, profileID
 			st.Name, st.Avatar, st.Country = hostName, avatar, hostCountry
+			st.Rank = s.rankOf(r.Context(), profileID)
 		}
 		rec.Seats = append(rec.Seats, st)
 	}
@@ -219,11 +220,13 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 			rec.Seats[i].Profile = profileID
 			rec.Seats[i].Skin = skin
 			rec.Seats[i].Name, rec.Seats[i].Avatar, rec.Seats[i].Country = name, avatar, country
+			rec.Seats[i].Rank = s.rankOf(r.Context(), profileID)
 			break
 		}
 	}
 	if rec.FreeSeats() == 0 {
 		startGame(rec)
+		s.armClock(rec)
 	}
 	rec.Version++
 	if err := s.st.Update(r.Context(), rec); err != nil {
@@ -361,6 +364,7 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, status, err.Error())
 		return
 	}
+	s.armClock(rec)
 	if rec.State.Status == game.StatusFinished {
 		rec.Status = "finished"
 	}
@@ -419,6 +423,7 @@ func (s *Server) handleRoll(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
+	s.armClock(rec)
 	rec.Version++
 	if err := s.st.Update(r.Context(), rec); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not save the throw")
