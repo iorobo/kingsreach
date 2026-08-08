@@ -178,15 +178,6 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "that table is gone")
 		return
 	}
-	if rec.Status != "waiting" || rec.FreeSeats() == 0 {
-		writeErr(w, http.StatusConflict, "that table is already full")
-		return
-	}
-	if rec.Locked() && hashPassword(req.Password, rec.PasswordSalt) != rec.PasswordHash {
-		writeErr(w, http.StatusForbidden, "wrong password")
-		return
-	}
-
 	token := randHex(16)
 	skin, profileID := DefaultSkin, ""
 	name, country, avatar := "Wanderer", "", ""
@@ -200,17 +191,29 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// One identity, one seat. Two browser windows signed in to the same account
-	// could otherwise sit down opposite each other, which is not a game — and
-	// with a computer filling a third seat it hands out a guaranteed victory
-	// every time. The seat you already hold is still yours; use the token the
-	// server gave you then, rather than taking another.
+	// Already sitting here? Then this is coming back, not joining, and it is
+	// answered before anything else — a game you walked out of is "in progress"
+	// and "full", and both of those would otherwise turn you away from your own
+	// chair. Closing the tab loses the seat token but not the seat, so hand the
+	// same one back rather than a new one.
+	//
+	// This is also still the rule that stops a second window taking a second
+	// seat: what it gets is the seat it already has.
 	if profileID != "" {
 		if seat, taken := rec.SeatForProfile(profileID); taken {
-			logf("game %s: profile %s tried to take a second seat (already at %s)", rec.ID, profileID, seat.Seat)
-			writeErr(w, http.StatusConflict, "you are already at this table")
+			logf("game %s: %s returned to %s", rec.ID, profileID, seat.Seat)
+			writeJSON(w, http.StatusOK, stateWithToken{s.stateFor(rec, seat.Token), seat.Token})
 			return
 		}
+	}
+
+	if rec.Status != "waiting" || rec.FreeSeats() == 0 {
+		writeErr(w, http.StatusConflict, "that table is already full")
+		return
+	}
+	if rec.Locked() && hashPassword(req.Password, rec.PasswordSalt) != rec.PasswordHash {
+		writeErr(w, http.StatusForbidden, "wrong password")
+		return
 	}
 
 	for i := range rec.Seats {

@@ -591,7 +591,11 @@ export class Ui {
     const body = $("lobby-rows");
     body.replaceChildren();
     for (const l of open) body.appendChild(this.lobbyRow(l));
-    for (const r of live) body.appendChild(runningRow(r, (id) => this.h.watchTable(id)));
+    for (const r of live) {
+      body.appendChild(
+        runningRow(r, (id) => this.h.watchTable(id), (id) => this.h.joinTable(id, "")),
+      );
+    }
 
     if (!open.length && !live.length) {
       const tr = document.createElement("tr");
@@ -1096,9 +1100,13 @@ function onEnter(input: HTMLInputElement, run: () => void): void {
 }
 
 /** A game under way: not joinable, but you can pull up a chair and watch. */
-function runningRow(r: RunningTable, onWatch: (id: string) => void): HTMLElement {
+function runningRow(
+  r: RunningTable,
+  onWatch: (id: string) => void,
+  onReturn: (id: string) => void,
+): HTMLElement {
   const row = document.createElement("tr");
-  row.className = "running";
+  row.className = r.yours ? "mine" : "running";
 
   const name = document.createElement("td");
   const box = document.createElement("div");
@@ -1128,9 +1136,11 @@ function runningRow(r: RunningTable, onWatch: (id: string) => void): HTMLElement
   const act = document.createElement("td");
   act.className = "act";
   const btn = document.createElement("button");
-  btn.className = "ghost";
-  btn.textContent = "Watch";
-  btn.onclick = () => onWatch(r.gameId);
+  // Your own game, still going: offer the chair back rather than a seat in
+  // the audience for a match you are supposed to be playing.
+  btn.className = r.yours ? "primary" : "ghost";
+  btn.textContent = r.yours ? "Return" : "Watch";
+  btn.onclick = () => (r.yours ? onReturn(r.gameId) : onWatch(r.gameId));
   act.appendChild(btn);
 
   row.append(name, seats, when, act);

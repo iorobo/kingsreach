@@ -43,6 +43,10 @@ type runningEntry struct {
 	// Bots is how many seats the computer is playing, so the browser can say
 	// "computer match" rather than implying people are at the table.
 	Bots int `json:"bots"`
+	// Yours means you hold a seat here — you walked away from a game that is
+	// still going. Without this the browser offers to let you watch your own
+	// match instead of sitting back down at it.
+	Yours bool `json:"yours,omitempty"`
 }
 
 func (s *Server) handleLobbies(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +82,7 @@ func (s *Server) handleLobbies(w http.ResponseWriter, r *http.Request) {
 		})
 		seenHost[g.HostName], seenName[nameKey(g.Name)] = true, true
 	}
-	out.Running = s.runningTables(r.Context(), seenHost, seenName)
+	out.Running = s.runningTables(r.Context(), myProfile, seenHost, seenName)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -90,7 +94,7 @@ func (s *Server) handleLobbies(w http.ResponseWriter, r *http.Request) {
 //
 // seenHost and seenName carry the entries already shown in the open list, so
 // the same person never turns up twice in the same room.
-func (s *Server) runningTables(ctx context.Context, seenHost, seenName map[string]bool) []runningEntry {
+func (s *Server) runningTables(ctx context.Context, myProfile string, seenHost, seenName map[string]bool) []runningEntry {
 	out := []runningEntry{}
 	games, err := s.st.ListActive(ctx, 40)
 	if err != nil {
@@ -103,7 +107,8 @@ func (s *Server) runningTables(ctx context.Context, seenHost, seenName map[strin
 		if g.Mode != ModeOnline || time.Since(g.UpdatedAt) > 10*time.Minute {
 			continue
 		}
-		if seenHost[g.HostName] || seenName[nameKey(g.Name)] {
+		_, mine := g.SeatForProfile(myProfile)
+		if !mine && (seenHost[g.HostName] || seenName[nameKey(g.Name)]) {
 			continue // already on screen in the open list
 		}
 		host := g.HostName
@@ -115,7 +120,7 @@ func (s *Server) runningTables(ctx context.Context, seenHost, seenName map[strin
 			GameID: g.ID, Name: g.Name, Host: host, Country: g.HostCountry,
 			Players: g.Players, Ply: g.State.Ply,
 			Minutes: int(time.Since(g.CreatedAt).Minutes()),
-			Bots:    countBots(g),
+			Bots:    countBots(g), Yours: mine,
 		})
 		if len(out) == 12 {
 			break

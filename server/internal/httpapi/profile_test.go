@@ -168,6 +168,50 @@ func TestProfileProgressionAndEquip(t *testing.T) {
 	}
 }
 
+// Leaving a game, or closing the tab, must not lock you out of your own chair.
+// The seat token lives in the browser; the seat does not.
+func TestComingBackToYourOwnGame(t *testing.T) {
+	ts := testServer(t)
+	tok := signedIn(t, ts, "76561190000000040", "Wanderer off")
+
+	_, g := request(t, "POST", ts.URL+"/api/games",
+		map[string]any{"mode": "online", "players": 2, "profile": tok, "name": "back in a bit"})
+	id, first := g["gameId"].(string), g["token"].(string)
+	request(t, "POST", ts.URL+"/api/games/"+id+"/start", map[string]string{"token": first})
+
+	// The browser is gone: the seat token with it. All we have is the account.
+	code, back := request(t, "POST", ts.URL+"/api/games/join",
+		map[string]string{"gameId": id, "profile": tok})
+	if code != 200 {
+		t.Fatalf("returning to my own game = %d, want 200 (%v)", code, back)
+	}
+	if back["token"] != first {
+		t.Fatalf("should have been handed the same seat token back")
+	}
+	if back["you"] != g["you"] {
+		t.Fatalf("came back to seat %v, but was sitting at %v", back["you"], g["you"])
+	}
+	if back["status"] != "active" {
+		t.Fatalf("the game should still be going: %v", back["status"])
+	}
+
+	// And the board room offers the chair back rather than a seat in the
+	// audience for a game you are supposed to be playing.
+	_, list := request(t, "GET", ts.URL+"/api/lobbies?token="+tok, nil)
+	found := false
+	for _, r := range lobbiesOf(list, "running") {
+		if r["gameId"] == id {
+			found = true
+			if r["yours"] != true {
+				t.Fatalf("my own game in progress is not marked as mine: %v", r)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("my game is not listed as in progress")
+	}
+}
+
 // Two browser windows on one account must not end up facing each other.
 func TestOneAccountCannotTakeTwoSeats(t *testing.T) {
 	ts := testServer(t)
@@ -177,26 +221,44 @@ func TestOneAccountCannotTakeTwoSeats(t *testing.T) {
 		map[string]any{"mode": "online", "players": 4, "profile": tok, "name": "just me"})
 	id := g["gameId"].(string)
 
-	// The creator already holds a seat, so a second window is refused.
+	// A second window gets the seat it already holds, not another one. The
+	// property that matters is the seat count, not the status code — asking
+	// twice must never fill two chairs.
 	code, res := request(t, "POST", ts.URL+"/api/games/join",
 		map[string]string{"gameId": id, "profile": tok})
-	if code != 409 {
-		t.Fatalf("second seat for the same account = %d, want 409 (%v)", code, res)
+	if code != 200 || res["token"] != g["token"] {
+		t.Fatalf("asking again should hand back the same seat: %d %v", code, res)
+	}
+	if taken := seatsTaken(res); taken != 1 {
+		t.Fatalf("one account filled %d seats", taken)
 	}
 
-	// Somebody else still gets in.
+	// Somebody else still gets in, and takes a different chair.
 	other := signedIn(t, ts, "76561190000000011", "Rival")
-	code, res = request(t, "POST", ts.URL+"/api/games/join",
+	code, joined := request(t, "POST", ts.URL+"/api/games/join",
 		map[string]string{"gameId": id, "profile": other})
 	if code != 200 {
-		t.Fatalf("a different account should be welcome: %d %v", code, res)
+		t.Fatalf("a different account should be welcome: %d %v", code, joined)
 	}
-	// And is then refused a second seat too.
-	code, _ = request(t, "POST", ts.URL+"/api/games/join",
+	if joined["you"] == g["you"] {
+		t.Fatalf("the rival was seated on top of the host")
+	}
+	// And they cannot double up either.
+	_, again := request(t, "POST", ts.URL+"/api/games/join",
 		map[string]string{"gameId": id, "profile": other})
-	if code != 409 {
-		t.Fatalf("rival's second seat = %d, want 409", code)
+	if seatsTaken(again) != 2 {
+		t.Fatalf("two accounts filled %d seats", seatsTaken(again))
 	}
+}
+
+func seatsTaken(state map[string]any) int {
+	n := 0
+	for _, s := range seatsOf(state) {
+		if s["taken"] == true {
+			n++
+		}
+	}
+	return n
 }
 
 // Even if a duplicate seat got in some other way, it wins nothing.

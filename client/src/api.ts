@@ -180,6 +180,8 @@ export interface RunningTable {
   minutes: number;
   /** How many seats the computer is playing. */
   bots: number;
+  /** You hold a seat here — a game you walked away from, still going. */
+  yours?: boolean;
 }
 
 export class ApiError extends Error {
