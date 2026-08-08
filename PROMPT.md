@@ -557,7 +557,14 @@ enforces.
   a password is needed. Joinable tables always sort above games under way) → Open-a-table (name, 2/3/4 seats, optional password) → Lobby (who is seated, and *Start now*,
   which hands the empty seats to the computer) → Game (status bar; seat list down the left with
   flag, name, turn marker and knock-out reason; bottom bar with **Focus**, Resign, Leave)
-  → result overlay.
+  → result banner.
+- **The result is a banner, not a dialog.** It was a centred card over a dimmed backdrop, which
+  covered the one thing it exists to announce — see the finale below. It now takes the bottom
+  bar's place (`body.finished`) rather than stacking on top of it, since Leave and *Back to the
+  great hall* do the same job; **Focus** is repeated in the banner because it is the only button
+  from that bar still worth having once the game is over. Under 560px the text takes its own row so
+  the three buttons share the next one: on a phone the title alone wrapped to three lines and the
+  banner ate a fifth of the screen, which is the popup problem again, just moved downwards.
 - **Country flags are drawn in CSS** (`flags.ts`), not emoji. Windows ships no glyphs for regional
   indicator pairs, so 🇳🇱 renders there as the bare letters "NL"; layered gradients look the same
   everywhere. Unknown codes fall back to a neutral chip with the two letters.

@@ -23,6 +23,7 @@ export const RELEASES: Release[] = [
     changes: [
       "Winning drops a gold crown onto your king, in a shower of sparks, with a fanfare to go with it.",
       "Losing has its own ending now: the board goes dark and a tarnished crown topples onto your square. A result you can see beats a box with a word in it.",
+      "The result arrives as a bar along the bottom instead of a box across the middle, so you can actually watch the ending it is announcing.",
       "The computer looks further ahead. Medium considers your reply before it moves — it genuinely did not before — and hard thinks two moves deep for each side. Hard now beats medium nine games in ten.",
       "The matches in progress are staggered rather than all started at once, so there is something half-played to watch instead of six games on move one.",
       "Rejoining a table you had left no longer insists you are already sitting at it.",

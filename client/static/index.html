@@ -133,6 +133,40 @@
   @keyframes pulse { 50% { opacity: .45; } }
   #bottombar { bottom: 0; border-top-width: 1px; flex-wrap: wrap; }
   #bottombar button { padding: 7px 14px; font-size: 15px; }
+
+  /* The result is a banner, not a dialog.
+     A card in the middle of the screen covers the one thing it is there to
+     announce — the crown coming down, or the board going dark under a fallen
+     one. It takes the bottom bar's place rather than stacking on top of it,
+     which is also why Focus is repeated here: at that point it is the only
+     button from the bar still worth having. */
+  #result {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 22;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 14px; background: var(--bar); backdrop-filter: blur(6px);
+    border-top: 1px solid var(--line);
+    animation: risefromfloor .5s cubic-bezier(.2,.9,.3,1) both;
+  }
+  @keyframes risefromfloor { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { #result { animation: none; } }
+  .resulttext { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  #result-title { color: var(--gold-pale); text-transform: uppercase; letter-spacing: 3px; font-size: 18px; }
+  #result-reason { color: var(--teal); font-style: italic; font-size: 15px; }
+  #rematch-note { color: #a99e8c; font-size: 13px; font-style: italic; }
+  #result button { padding: 7px 14px; font-size: 15px; }
+  /* While the banner is up it *is* the bottom bar; two of them would put
+     Leave next to Back to the great hall doing the same thing. */
+  body.finished #bottombar { display: none; }
+  /* On a phone the title alone wrapped to three lines and the banner ate a
+     fifth of the screen — which is the popup problem again, just at the
+     bottom. Text on its own row, buttons sharing the next one. */
+  @media (max-width: 560px) {
+    #result { padding: 8px 10px; gap: 6px; }
+    .resulttext { flex: 1 1 100%; gap: 6px; }
+    #result-title { font-size: 15px; letter-spacing: 1.5px; }
+    #result-reason, #rematch-note { font-size: 13px; }
+    #result button { flex: 1 1 auto; padding: 7px 6px; font-size: 13px; white-space: nowrap; }
+  }
   #seat { color: var(--teal); font-size: 14px; }
   #gamecode { color: var(--gold-pale); font-size: 14px; letter-spacing: 2px; }
   .spacer { flex: 1; }
@@ -523,14 +557,15 @@
     </div>
   </div>
 
-  <div id="result" class="overlay hidden">
-    <div class="card">
-      <h1 id="result-title" style="font-size:32px"></h1>
-      <div class="tagline" id="result-reason"></div>
-      <button class="primary wide" id="btn-rematch">Rematch</button>
-      <div class="hint hidden" id="rematch-note"></div>
-      <button class="ghost wide" id="btn-back">Back to the great hall</button>
+  <div id="result" class="hidden">
+    <div class="resulttext">
+      <strong id="result-title"></strong>
+      <span id="result-reason"></span>
+      <span class="hidden" id="rematch-note"></span>
     </div>
+    <button id="btn-result-focus" title="Look from your side of the table again">Focus</button>
+    <button class="primary" id="btn-rematch">Rematch</button>
+    <button class="ghost" id="btn-back">Back to the great hall</button>
   </div>
 
   <div id="bubbles"></div>

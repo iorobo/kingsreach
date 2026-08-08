@@ -135,6 +135,7 @@ export class Ui {
     $("btn-back").onclick = () => h.leave();
     $("btn-rematch").onclick = () => h.rematch();
     $("btn-focus").onclick = () => h.focus();
+    $("btn-result-focus").onclick = () => h.focus();
     $("btn-throw").onclick = () => h.rollDie();
     $("btn-resign").onclick = () => this.onResign();
     $("btn-cancel-flag").onclick = () => $("flagpicker").classList.add("hidden");
@@ -464,6 +465,7 @@ export class Ui {
     ]) {
       $(id).classList.add("hidden");
     }
+    document.body.classList.remove("finished");
   }
 
   showSignIn(): void {
@@ -772,6 +774,9 @@ export class Ui {
     $("btn-rematch").textContent = "Rematch";
     $("rematch-note").classList.add("hidden");
     $("result").classList.remove("hidden");
+    // The banner replaces the bottom bar for as long as it is up; hideAll puts
+    // it back.
+    document.body.classList.add("finished");
   }
 
   /** Somebody at the table has asked for another game; say so. */

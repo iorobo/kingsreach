@@ -80,6 +80,10 @@ time it plays there is nothing standing on that square to knock over. Both live 
 `client/src/finale.ts`; the fanfare follows the ♪ mute, because someone who turned the music off
 did not mean "except when I win".
 
+The result itself arrives as a **bar along the bottom** rather than a card across the middle — a
+dialog would cover the ending it is there to announce. It takes the bottom bar's place while it is
+up, and carries Focus so you can still swing the camera back to your own side of the table.
+
 When a game ends, **Rematch** sets the same table up again. Against the computer it starts at once;
 against a person it waits until they press it too.
 
