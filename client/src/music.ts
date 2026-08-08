@@ -30,6 +30,20 @@ export const TRACKS: Track[] = [
 const STORE_MUTED = "kr_music_muted";
 const VOLUME = 0.34; // background, not foreground
 
+/**
+ * Played once when you win, over the top of nothing — the background track
+ * ducks out of the way so the fanfare has the room to itself.
+ */
+// CC0 asks for nothing, but it is credited anyway — the list is there to say
+// where the game's borrowed parts came from, not only where it is compelled to.
+export const VICTORY: Track = {
+  title: "Medieval: The Old Tower Inn",
+  artist: "RandomMind",
+  src: "audio/victory.mp3",
+  licence: "CC0",
+  source: "opengameart.org",
+};
+
 export class Music {
   private readonly audio = new Audio();
   private index = 0;
@@ -78,9 +92,31 @@ export class Music {
     return TRACKS[this.index] ?? null;
   }
 
-  /** Every track, for a credits list. */
+  /** Every track, for a credits list — the fanfare included, since it is
+   *  borrowed on the same terms as the rest. */
   get playlist(): readonly Track[] {
-    return TRACKS;
+    return [...TRACKS, VICTORY];
+  }
+
+  /**
+   * Plays the victory fanfare and steps the background track aside for it.
+   * Follows the mute, because both are noise from the game and a player who
+   * turned the music off did not mean "except when I win".
+   */
+  async fanfare(): Promise<void> {
+    if (this.muted) return;
+    const wasPlaying = !this.audio.paused;
+    this.audio.pause();
+    const cheer = new Audio(VICTORY.src);
+    cheer.volume = 0.55;
+    cheer.addEventListener("ended", () => {
+      if (wasPlaying && !this.muted) void this.audio.play().catch(() => {});
+    });
+    try {
+      await cheer.play();
+    } catch {
+      if (wasPlaying) void this.audio.play().catch(() => {});
+    }
   }
 
   toggleMute(): void {

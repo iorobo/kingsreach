@@ -35,6 +35,13 @@ export const ASSET_CREDITS: Credit[] = [
     source: "Sketchfab",
     url: "https://sketchfab.com/3d-models/dice-3b955af797e140eca0947ede57f412ba",
   },
+  {
+    title: "King crown",
+    author: "marekc",
+    licence: "CC BY 4.0",
+    source: "Sketchfab",
+    url: "https://sketchfab.com/3d-models/king-crown-909b3f198d5b49cea3f68549a8f57b51",
+  },
   // Not artwork, but the same obligation: MaxMind's terms require this notice
   // wherever the data is used. The flag next to a player's name comes from it.
   {

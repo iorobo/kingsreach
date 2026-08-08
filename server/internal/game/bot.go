@@ -1,6 +1,9 @@
 package game
 
-import "math/rand"
+import (
+	"math/rand"
+	"sort"
+)
 
 // A computer player, at three strengths.
 //
@@ -49,16 +52,20 @@ func decay(score float64, ply int) float64 {
 	return score
 }
 
-// searchDepth is how many plies each level looks ahead. Depth 1 is "score the
-// position after my move"; depth 3 is "…and after their best reply, and mine".
+// searchDepth is how many plies each level looks ahead.
+//
+// Depth 1 does not look ahead at all — it scores the position after its own
+// move and stops, which is why medium used to walk into replies it could have
+// seen coming. Depth 2 is "…and their best answer", which is the least a
+// player would call thinking. Hard goes two moves deep for each side.
 func searchDepth(difficulty string) int {
 	switch difficulty {
 	case Hard:
-		return 3
+		return 4
 	case Easy:
 		return 1
 	default:
-		return 1
+		return 2
 	}
 }
 
@@ -252,6 +259,23 @@ func firstQuietMove(s *State, moves []scoredMove) *scoredMove {
 	return nil
 }
 
+// sortedDests is legalDests in a fixed order.
+//
+// Ranging over the map straight from legalDests is what made the bot
+// irreproducible: the random tiebreak in rankMoves draws its numbers in
+// iteration order, so the same position from the same seed picked a different
+// move on every run. Sorting first costs a few string compares per turn and
+// makes a reported game replayable.
+func (b *Board) sortedDests(occ map[NodeID]*Piece, p *Piece, allow bool) []NodeID {
+	dests := b.legalDests(occ, p, allow)
+	out := make([]NodeID, 0, len(dests))
+	for to := range dests {
+		out = append(out, to)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
 // rankMoves scores every legal move, best first.
 func (b *Board) rankMoves(s *State, seat Color, difficulty string, rng *rand.Rand) []scoredMove {
 	occ := s.Occupancy()
@@ -267,7 +291,7 @@ func (b *Board) rankMoves(s *State, seat Color, difficulty string, rng *rand.Ran
 		if p.Captured || p.Owner != seat {
 			continue
 		}
-		for to := range b.legalDests(occ, p, allow) {
+		for _, to := range b.sortedDests(occ, p, allow) {
 			trial := s.Clone()
 			if _, err := b.ApplyMove(trial, seat, p.Node, to); err != nil {
 				continue // never offer a move we cannot actually make
@@ -314,6 +338,51 @@ func (b *Board) hangs(after *State, seat Color, at NodeID) float64 {
 	return loss
 }
 
+// candidate is one move, ready to be searched.
+type candidate struct {
+	piece *Piece
+	to    NodeID
+	grab  float64 // what it takes, for ordering
+}
+
+// orderedMoves lists a seat's moves with the captures first.
+//
+// Alpha-beta only pays for itself when good moves are tried early: a branch
+// that is going to be refuted should be refuted on the first reply, not the
+// twentieth. Trying captures first is the cheapest ordering that works, and it
+// is what makes searching four plies affordable at all.
+func (b *Board) orderedMoves(s *State, seat Color, occ map[NodeID]*Piece, allow bool) []candidate {
+	out := make([]candidate, 0, 32)
+	for _, p := range s.Pieces {
+		if p.Captured || p.Owner != seat {
+			continue
+		}
+		for to := range b.legalDests(occ, p, allow) {
+			grab := 0.0
+			if victim := occ[to]; victim != nil && victim.Owner != seat {
+				grab = pieceWorth(victim.Value)
+			}
+			out = append(out, candidate{piece: p, to: to, grab: grab})
+		}
+	}
+	// Captures first, so alpha-beta has something to cut against — and then a
+	// total order on the rest. legalDests hands back a map, so without the
+	// tiebreak the equally-scored moves (nearly all of them) come out in Go's
+	// randomised map order and the same position played from the same seed
+	// gives a different game every run. That costs nothing in strength and
+	// buys reproducible bugs.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].grab != out[j].grab {
+			return out[i].grab > out[j].grab
+		}
+		if out[i].piece.ID != out[j].piece.ID {
+			return out[i].piece.ID < out[j].piece.ID
+		}
+		return out[i].to < out[j].to
+	})
+	return out
+}
+
 // search is negamax with alpha-beta, run "paranoid" at more than two players:
 // every rival is treated as one opponent picking the single reply that hurts
 // seat most. Modelling three players each chasing their own win is a different
@@ -336,11 +405,9 @@ func (b *Board) search(s *State, seat Color, depth, ply int, alpha, beta float64
 	}
 	any := false
 
-	for _, p := range s.Pieces {
-		if p.Captured || p.Owner != mover {
-			continue
-		}
-		for to := range b.legalDests(occ, p, allow) {
+	for _, m := range b.orderedMoves(s, mover, occ, allow) {
+		{
+			p, to := m.piece, m.to
 			trial := s.Clone()
 			if _, err := b.ApplyMove(trial, mover, p.Node, to); err != nil {
 				continue

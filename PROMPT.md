@@ -372,6 +372,20 @@ guest sign-in screen where it used to live.
   ordinary rows, ordinary engine, ordinary move history, just with nobody human at the table. They
   are `Listed: false`, because they are already under way and are there to be watched, not joined.
 
+  They are seeded **from the `RunBots` ticker, one per pass and no more often than every 25–70
+  seconds** (`nextShow`), not on demand when the board room is first opened. Three details, none of
+  them obvious:
+  - Seeding on demand meant every exhibition was created in the same second the first visitor
+    arrived, so *Watch* always opened on move one, whichever game you picked.
+  - One per pass is not enough by itself: the tick is 900 ms, so six games would still be created
+    within five seconds of each other and would stay in lockstep for the rest of their lives.
+  - The gap is what actually spreads them. The cost is a cold start that reaches its quota over a
+    few minutes rather than instantly, which is the right trade — the house's *open* tables fill
+    the room in the meantime.
+
+  The engine was never the problem: an exhibition advances a ply per tick and passes 50 within a
+  minute.
+
 Practice games and games untouched for ten minutes are left out of `running`; games abandoned for
 six hours are deleted outright. No handle and no table name appears twice in one response —
 across *both* lists, and comparing names by `nameKey` so "tem alguem ai" and "tem alguem ai!!"
@@ -423,9 +437,20 @@ The first version scored one ply and took the best move. It checked whether its 
 left hanging but never whether **the piece it had just moved** was, so it walked into every trade.
 `hangs` is that missing term, and it is worth more than all the positional tuning together.
 
-Hard searches three plies with alpha–beta. At three or four players it runs **paranoid** — every
-rival treated as one opponent picking the reply that hurts most — which is the honest cheap choice
-for a multi-player game.
+**Depth is the other half.** Easy is depth 1 — it scores the position after its own move and stops,
+which is not looking ahead at all. Medium is depth 2, "…and their best answer", the least anybody
+would call thinking; it used to be depth 1 too, and walking into replies it could have seen is
+precisely what made it feel witless. Hard is depth 4, two moves each. `orderedMoves` puts captures
+first so alpha–beta prunes hard enough to afford that. At three or four players the search runs
+**paranoid** — every rival treated as one opponent picking the reply that hurts most — which is the
+honest cheap choice for a multi-player game.
+
+**The bot is reproducible from its seed.** It was not, and the cause is worth remembering: move
+generation hands back a `map`, Go randomises map iteration, and `rankMoves` draws its random
+tiebreak *in that order* — so the same position from the same seed chose a different move on every
+run. `sortedDests` fixes the order before the noise is drawn, and `orderedMoves` sorts on a total
+order rather than an unstable pass over an already-random slice. The symptom was a strength test
+that scored 4/6 and 6/6 on identical code; the real cost is that no reported game could be replayed.
 
 **Wins are decayed by distance** (`decay`, `plyCost`). Without it, "step onto the Throne" and "step
 *next* to the Throne and take it next turn" both score a win, the tie falls to the randomness, and
@@ -433,7 +458,9 @@ the bot dawdles in front of an open goal. This was caught by `TestBotTakesTheThr
 the kind of thing a search gets wrong silently.
 
 `strength_test.go` plays the levels against each other and reports the score, so "the AI is bad" is
-answerable with a number. At the time of writing: hard 10–0 over easy, medium 10–0.
+answerable with a number. At the time of writing, over ten games each: hard 10–0 easy, medium 9–1
+easy, and **hard 9–1 medium**. That last pairing is the only one that proves anything — easy loses
+to everything, so beating it says nothing about depth.
 
 Bots pause before moving (`clocks.go`), longer when a capture is on the table. The ranges are env
 vars — see the README table — so a deployment can tune the feel without a rebuild, and tests set
@@ -539,12 +566,34 @@ enforces.
   playback actually starts, so a player who mutes never downloads a byte; the Go server answers
   range requests, so the track streams instead of arriving in one lump. Browsers refuse audio
   until a user gesture, so the first click anywhere starts it. Mute persists in `localStorage`.
-- **Credits are data, not prose** (`credits.ts` + the `licence` fields in `music.ts`). Every
+- **Credits are data, not prose** (`credits.ts` + the `licence` fields in `music.ts`). Nearly every
   borrowed asset here is Creative Commons Attribution, and CC-BY requires the credit to reach the
   people *using* the work — a line in a README nobody opens does not discharge it. So the
   Collection screen renders the credits from the same arrays that declare the assets, and they
   cannot drift out of sync with what actually ships. A complete credit is four things: title,
-  author, licence, source. Adding an asset means adding a row.
+  author, licence, source. Adding an asset means adding a row. **Look the four up; do not infer
+  them.** The victory track was nearly shipped as CC BY on the assumption that everything here is,
+  and it is CC0; the crown nearly shipped under an invented author's name. A wrong credit is worse
+  than none — it attributes someone's work to somebody else.
+- **Both endings are staged** (`finale.ts`). Winning: the crown falls onto the winner's king,
+  bounces, and turns while gold sparks come off it, with `music.fanfare()` ducking the background
+  track. Losing: the board darkens under a hex pall cut to the cloth's own outline, and a tarnished
+  copy of the same crown drops onto the loser's square and tips over. Three things here were got
+  wrong first and are worth not repeating:
+  - **`loadGlb` measures in world space and assumes its parent sits at the origin.** True of the
+    scenery it was written for; false of a node an animation moves. Handing it a moving carrier put
+    the crown under the board. `mountCrown` loads the model itself, measures it before parenting,
+    and stands it on the carrier's origin — which also means the loser's crown tips over its own
+    base, like a real one.
+  - **The famous one-pixel base64 GIF is the *transparent* pixel** every tracking image uses. As a
+    particle texture it renders a few hundred perfectly invisible sparks — `getActiveCount()` says
+    170 and the screen says nothing. The dot is drawn into a `DynamicTexture` instead, which is
+    both visible and round.
+  - **`manualEmitCount` is one-shot mode, not a burst on top.** Setting it for the landing flash
+    silences `emitRate` permanently; it has to be handed back to `-1` on the following frame.
+  The loser's animation deliberately does not depend on the king mesh: the usual way to lose is the
+  king being taken, and a captured piece has no square left, so it stages over the centroid of
+  whatever that player still has on the board.
 - **Crystal Court's pips take the contrast colour**, like every other skin. They used to take the
   seat's own hue — on a translucent, glowing gem *of that hue*, which made the piece's value
   unreadable. Unlit, so the glow cannot wash them out again.

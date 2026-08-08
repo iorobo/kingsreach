@@ -251,12 +251,21 @@ func (s *Server) seedExhibitions(ctx context.Context, taken map[string]bool) {
 	if s.showTarget == 0 || live == 0 {
 		s.showTarget = randRange(2, 6)
 	}
-	for live < s.showTarget {
+	// One at a time, and not in a hurry.
+	//
+	// Filling the quota in a single pass gave a row of games that had all begun
+	// in the same second and were therefore all on the same move: press Watch
+	// and the game had just started, whichever one you picked. One per tick is
+	// not enough on its own either — the tick is 900 ms, so six of them would
+	// still be within five seconds of each other and would stay in lockstep for
+	// the rest of their lives. The gap is what actually spreads them out, so a
+	// visitor finds one game opening and another deep into its endgame.
+	now := s.now()
+	if live < s.showTarget && now.After(s.nextShow) {
 		if err := s.createExhibition(ctx, taken); err != nil {
 			logf("could not start an exhibition game: %v", err)
-			return
 		}
-		live++
+		s.nextShow = now.Add(time.Duration(randRange(25, 70)) * time.Second)
 	}
 }
 
@@ -384,8 +393,14 @@ func fillBotSeats(rec *store.GameRecord) {
 }
 
 // RunBots drives everything that has to happen without anybody asking: the
-// computer taking its turns, and the clock running out on players who have
-// walked away. Both need to work whether or not a browser is polling.
+// computer taking its turns, the clock running out on players who walked away,
+// and keeping the house's own tables stocked.
+//
+// That last one used to happen only when somebody opened the board room, which
+// meant the exhibition games were created the instant you looked at them and
+// were therefore always at move zero — there was never anything to watch. They
+// are tended here instead, so they are already well under way by the time
+// anybody arrives.
 func (s *Server) RunBots(ctx context.Context) {
 	rng := mrand.New(mrand.NewSource(time.Now().UnixNano()))
 	ticker := time.NewTicker(900 * time.Millisecond)
@@ -395,6 +410,7 @@ func (s *Server) RunBots(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			s.seedLobbies(ctx)
 			s.stepBots(ctx, rng)
 		}
 	}

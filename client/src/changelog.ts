@@ -17,6 +17,18 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: "0.8",
+    date: "2026-08-08",
+    headline: "An ending worth reaching, and an opponent that sees it coming.",
+    changes: [
+      "Winning drops a gold crown onto your king, in a shower of sparks, with a fanfare to go with it.",
+      "Losing has its own ending now: the board goes dark and a tarnished crown topples onto your square. A result you can see beats a box with a word in it.",
+      "The computer looks further ahead. Medium considers your reply before it moves — it genuinely did not before — and hard thinks two moves deep for each side. Hard now beats medium nine games in ten.",
+      "The matches in progress are staggered rather than all started at once, so there is something half-played to watch instead of six games on move one.",
+      "Rejoining a table you had left no longer insists you are already sitting at it.",
+    ],
+  },
+  {
     version: "0.7",
     date: "2026-08-08",
     headline: "Say something, and learn how to play.",

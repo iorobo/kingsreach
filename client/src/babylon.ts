@@ -25,6 +25,7 @@ export { Texture } from "@babylonjs/core/Materials/Textures/texture";
 export { Mesh } from "@babylonjs/core/Meshes/mesh";
 export { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 export { TransformNode } from "@babylonjs/core/Meshes/transformNode";
+export { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
 export { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 export { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
 

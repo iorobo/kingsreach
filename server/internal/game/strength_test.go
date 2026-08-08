@@ -68,6 +68,22 @@ func TestHardBeatsEasy(t *testing.T) {
 	}
 }
 
+// The discriminating test. Easy is beaten by anything, so "hard 10–0 over
+// easy" says little; hard against medium is what shows that looking further
+// ahead is worth something.
+func TestHardBeatsMedium(t *testing.T) {
+	if testing.Short() {
+		t.Skip("plays whole games; skipped under -short")
+	}
+	b := board(t)
+	const games = 10
+	hard, medium, draws := score(t, b, Hard, Medium, games)
+	t.Logf("hard %d – medium %d (%d drawn) over %d games", hard, medium, draws, games)
+	if hard <= medium {
+		t.Fatalf("hard won %d and medium won %d — the extra depth is buying nothing", hard, medium)
+	}
+}
+
 func TestMediumBeatsEasy(t *testing.T) {
 	if testing.Short() {
 		t.Skip("plays whole games; skipped under -short")

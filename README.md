@@ -59,9 +59,26 @@ red near the end; run it out and you forfeit your seat, and the game goes to who
 computer included. Offline games have no clock. Change it with `KINGSREACH_MOVE_SECONDS`.
 
 The computer plays at **easy, medium or hard**, picked at random when it sits down, and pauses
-before moving so it reads as an opponent rather than a script. Hard searches three plies with
-alpha–beta and wins about ten games in ten against easy; easy takes the odd bad move and sometimes
+before moving so it reads as an opponent rather than a script. Easy scores the position after its
+own move and stops; medium adds your best answer to that; hard searches four plies — two moves for
+each side — with alpha–beta and captures ordered first so the pruning pays for the depth. Over ten
+games the levels score hard 10–0 easy, medium 9–1 easy and **hard 9–1 medium**, which is the number
+that says the extra depth is worth something rather than just costing time (`go test
+./internal/game -run TestHardBeatsMedium -v`). Easy still takes the odd bad move and sometimes
 misses a capture outright. Beating any of them counts towards the hall of champions.
+
+Given the same seed the bot now plays the same game twice. That is not free — move generation
+returns a map, and Go randomises map iteration, so the destinations are sorted before the random
+tiebreak draws its numbers. Worth the few string compares: a bot that answers differently on
+identical input cannot be debugged, and a strength test measuring it means nothing.
+
+**Winning** drops a gold crown onto your king in a shower of sparks and plays a fanfare over the
+background music. **Losing** gets its own ending rather than the same box with a different word in
+it: the board darkens and a tarnished crown topples onto your square. The loser's version does not
+touch the king piece, deliberately — the usual way to lose *is* the king being taken, so by the
+time it plays there is nothing standing on that square to knock over. Both live in
+`client/src/finale.ts`; the fanfare follows the ♪ mute, because someone who turned the music off
+did not mean "except when I win".
 
 When a game ends, **Rematch** sets the same table up again. Against the computer it starts at once;
 against a person it waits until they press it too.
@@ -202,6 +219,12 @@ runs a handful of **exhibition matches between its own computer players**. Those
 you can press *Watch* and follow one move by move, which is also the easiest way to see how the
 three difficulty levels actually play. Set `KINGSREACH_BOT_LOBBIES=0` to switch all of it off.
 
+They are started **one at a time, 25–70 seconds apart, from the same ticker that takes the bot
+turns** — rather than all at once, the moment somebody first opens the room. That is the difference
+between a list of games all on move one and a list worth opening: after a few minutes the room
+holds a match just beginning next to one deep into its endgame. An exhibition advances a ply per
+tick, so it passes fifty within the minute.
+
 Anything in progress can be watched, including games between people. A spectator holds no seat, so
 they can see the board and nothing else.
 
@@ -266,7 +289,7 @@ docs/      original Dutch rules
 
 ### Third-party assets
 
-Everything borrowed here is **Creative Commons Attribution**, which means the credit is a
+Almost everything borrowed here is **Creative Commons Attribution**, which means the credit is a
 condition of use, not a nicety — so it is shown in the game's Collection screen, rendered from
 `client/src/credits.ts` and `client/src/music.ts` rather than hard-coded. Add an asset, add a row.
 
@@ -274,8 +297,14 @@ condition of use, not a nicety — so it is shown in the game's Collection scree
 |---|---|---|---|
 | `client/static/models/de-dust2.glb` | [de_dust2 - CS map](https://sketchfab.com/3d-models/de-dust2-cs-map-056008d59eb849a29c0ab6884c0c3d87) | pancakesbassoondonut (Sketchfab) | CC BY 4.0 |
 | `client/static/models/dice.glb` | [Dice](https://sketchfab.com/3d-models/dice-3b955af797e140eca0947ede57f412ba) | tnRaro (Sketchfab) | CC BY 4.0 |
+| `client/static/models/king-crown.glb` | [King crown](https://sketchfab.com/3d-models/king-crown-909b3f198d5b49cea3f68549a8f57b51) | marekc (Sketchfab) | CC BY 4.0 |
 | `client/static/audio/magic-escape-room.mp3` | Magic Escape Room | Kevin MacLeod (incompetech.com) | CC BY 4.0 |
+| `client/static/audio/victory.mp3` | [Medieval: The Old Tower Inn](https://opengameart.org/content/medieval-the-old-tower-inn) | RandomMind (OpenGameArt) | CC0 |
 | `server/internal/geoip/ipv4-country.bin` | GeoLite2 Country data, via [datasets/geoip2-ipv4](https://github.com/datasets/geoip2-ipv4) | MaxMind | GeoLite2 EULA — credit required |
+
+The victory fanfare is the exception: CC0 asks for nothing at all. It is credited anyway, because
+that list exists to record where the game's borrowed parts came from, not only where a licence
+compels it.
 
 One caveat on the map: the CC-BY licence is the uploader's, and covers the conversion work they
 did. The underlying *de_dust2* level and its textures are Valve Corporation's, and a third party

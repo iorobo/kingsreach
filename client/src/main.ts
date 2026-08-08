@@ -5,6 +5,7 @@ import type { BoardDto, CatalogItem, GameState, MoveOption, Profile, Seat } from
 import { BoardView } from "./board";
 import { DiceRoller } from "./dice";
 import { buildEnvironment } from "./environments";
+import { Finale } from "./finale";
 import type { BuiltEnvironment } from "./environments";
 import { Music } from "./music";
 import { Taunts } from "./taunts";
@@ -32,6 +33,7 @@ class Kingsreach {
   private readonly diceRoller: DiceRoller;
   private readonly music = new Music();
   private readonly taunts = new Taunts();
+  private readonly finale: Finale;
   private readonly ui: Ui;
 
   private env: BuiltEnvironment | null = null;
@@ -87,6 +89,7 @@ class Kingsreach {
     this.board.onMeshes = (meshes) => this.registerCasters(meshes);
 
     this.diceRoller = new DiceRoller(this.scene);
+    this.finale = new Finale(this.scene);
     this.ui = new Ui({
       steamLogin: () => this.steamLogin(),
       guest: (name, country) => void this.signInAsGuest(name, country),
@@ -566,6 +569,7 @@ class Kingsreach {
 
     this.state = null;
     this.deselect();
+    this.finale.clear();
     this.board.clear();
     this.ui.showGame();
     void this.applyState(state, false);
@@ -662,7 +666,13 @@ class Kingsreach {
     this.playIncomingTaunt(state);
     if (this.watching) {
       this.ui.updateWhileWatching(state);
-      if (state.status === "finished") this.stopPolling();
+      if (state.status === "finished") {
+        this.stopPolling();
+        // Spectators get the crown too. Watching a computer match to its end
+        // and being handed a line of text would be a poor reward for sitting
+        // through it.
+        void this.playFinale(state);
+      }
       return;
     }
     this.ui.updateFromState(state, this.myTurn());
@@ -675,6 +685,7 @@ class Kingsreach {
       this.stopPolling();
       const title = this.resultTitle(state);
       this.ui.status(title);
+      void this.playFinale(state);
       this.ui.showResult(title, REASONS[state.winReason] ?? state.winReason);
       // Keep polling the finished game, quietly: that is how we hear about a
       // rematch somebody else asked for. `forgetGame` would throw away the
@@ -694,6 +705,46 @@ class Kingsreach {
     if (!fresh) return;
     const from = state.seats.find((s) => s.seat === fresh.seat);
     this.ui.showTaunt(fresh.seat, from?.name ?? "", fresh.text);
+  }
+
+  /**
+   * The ending. Winning gets the crown and the fanfare; losing gets the board
+   * going dark and its king toppling. Watching gets the winner's version,
+   * because from a spectator's chair somebody did win.
+   */
+  private async playFinale(state: GameState): Promise<void> {
+    const won =
+      !!state.winner &&
+      (this.watching || state.you === "all" || state.mode === "offline" || state.winner === state.you);
+
+    if (won) {
+      // Centre it on the winner's king if it is still standing, or the Throne.
+      const king = state.pieces.find((p) => p.owner === state.winner && p.value === 1 && !p.captured);
+      void this.music.fanfare();
+      await this.finale.triumph(king ? this.board.nodeWorld(king.node) : this.board.nodeWorld("0,0"));
+      return;
+    }
+    const mine = state.pieces.find((p) => p.owner === state.you && p.value === 1);
+    const standing = mine && !mine.captured;
+    await this.finale.defeat(
+      standing ? this.board.nodeWorld(mine.node) : this.homeOf(state, state.you),
+      standing ? (this.board.pieceById(mine.id)?.root ?? null) : null,
+    );
+  }
+
+  /**
+   * Roughly where a player's army sits. The usual way to lose is your king
+   * being taken, and a captured piece has no square left — so the loser's
+   * ending is staged over whatever they still have on the board.
+   */
+  private homeOf(state: GameState, owner: string): Vector3 {
+    const theirs = state.pieces.filter((p) => p.owner === owner && !p.captured);
+    if (!theirs.length) return this.board.nodeWorld("0,0");
+    const sum = theirs.reduce(
+      (acc, p) => acc.addInPlace(this.board.nodeWorld(p.node)),
+      Vector3.Zero(),
+    );
+    return sum.scaleInPlace(1 / theirs.length);
   }
 
   /** Ticks the visible countdown between polls, so it moves once a second. */

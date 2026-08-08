@@ -61,6 +61,7 @@ type Server struct {
 	lastSeed   time.Time
 	seedTarget int // open tables to keep waiting
 	showTarget int // computer-versus-computer games to keep running
+	nextShow   time.Time
 }
 
 func New(st store.Store, staticDir string) *Server {

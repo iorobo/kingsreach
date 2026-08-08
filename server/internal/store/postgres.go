@@ -184,8 +184,9 @@ func (p *Postgres) Sweep(ctx context.Context, waitingOlderThan, activeOlderThan 
 	now := time.Now().UTC()
 	tag, err := p.pool.Exec(ctx, `
 		DELETE FROM games
-		WHERE (status = 'waiting' AND updated_at < $1)
-		   OR (status = 'active'  AND updated_at < $2)`,
+		WHERE (status = 'waiting'  AND updated_at < $1)
+		   OR (status = 'active'   AND updated_at < $2)
+		   OR (status = 'finished' AND updated_at < $2)`,
 		now.Add(-waitingOlderThan), now.Add(-activeOlderThan))
 	if err != nil {
 		return 0, err

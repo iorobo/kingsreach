@@ -124,8 +124,11 @@ func (m *Memory) Sweep(ctx context.Context, waitingOlderThan, activeOlderThan ti
 	activeCutoff := now.Add(-activeOlderThan)
 	n := 0
 	for id, rec := range m.byID {
+		// Finished games go on the same cutoff as abandoned ones: the result
+		// screen and the rematch window are long over, and the computer's own
+		// matches would otherwise pile up a few hundred rows an hour.
 		stale := (rec.Status == "waiting" && rec.UpdatedAt.Before(waitingCutoff)) ||
-			(rec.Status == "active" && rec.UpdatedAt.Before(activeCutoff))
+			(rec.Status != "waiting" && rec.UpdatedAt.Before(activeCutoff))
 		if stale {
 			delete(m.byID, id)
 			delete(m.byCode, strings.ToUpper(rec.Code))

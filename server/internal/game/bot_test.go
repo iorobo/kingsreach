@@ -2,6 +2,7 @@ package game
 
 import (
 	"math/rand"
+	"sort"
 	"testing"
 )
 
@@ -97,6 +98,36 @@ func TestBotsPlayAFullGame(t *testing.T) {
 	t.Logf("bots finished in %d plies: %s won by %s", s.Ply, s.Winner, s.WinReason)
 }
 
+// aimless plays the first legal move it finds, in a fixed order.
+//
+// The sort is not cosmetic. LegalMovesFrom hands back a map, and Go randomises
+// map iteration per run, so ranging over it directly gave the "aimless"
+// opponent a different game every time the suite ran — which made the win
+// count below drift between 4 and 6 and the test a coin toss. A strength test
+// that answers differently on identical code measures nothing.
+func aimless(b *Board, s *State, seat Color) bool {
+	for _, p := range s.Pieces {
+		if p.Captured || p.Owner != seat {
+			continue
+		}
+		moves := b.LegalMovesFrom(s, p.Node)
+		if len(moves) == 0 {
+			continue
+		}
+		dests := make([]NodeID, 0, len(moves))
+		for to := range moves {
+			dests = append(dests, to)
+		}
+		sort.Slice(dests, func(i, j int) bool { return dests[i] < dests[j] })
+		for _, to := range dests {
+			if _, err := b.ApplyMove(s, seat, p.Node, to); err == nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // A bot should beat a player that just shuffles its nearest piece about.
 func TestBotBeatsAimlessOpponent(t *testing.T) {
 	b := board(t)
@@ -116,28 +147,14 @@ func TestBotBeatsAimlessOpponent(t *testing.T) {
 				}
 				continue
 			}
-			// Aimless: first legal move it finds.
-			played := false
-			for _, p := range s.Pieces {
-				if p.Captured || p.Owner != East {
-					continue
-				}
-				for to := range b.LegalMovesFrom(s, p.Node) {
-					if _, err := b.ApplyMove(s, East, p.Node, to); err == nil {
-						played = true
-					}
-					break
-				}
-				if played {
-					break
-				}
-			}
-			if !played {
+			if !aimless(b, s, East) {
 				break
 			}
 		}
 		if s.Winner == West {
 			wins++
+		} else {
+			t.Logf("game %d: winner %q, %q after %d plies", g+1, s.Winner, s.WinReason, s.Ply)
 		}
 	}
 	if wins < games-1 {
