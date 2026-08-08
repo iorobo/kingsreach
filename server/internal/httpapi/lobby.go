@@ -594,7 +594,7 @@ func (s *Server) handleLobbyStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logf("game %s started early with %d computer seats", rec.ID, countBots(rec))
-	writeJSON(w, http.StatusOK, toClientState(rec, req.Token))
+	writeJSON(w, http.StatusOK, s.stateFor(rec, req.Token))
 }
 
 func countBots(rec *store.GameRecord) int {

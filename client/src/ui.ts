@@ -1,4 +1,8 @@
-import type { CatalogItem, GameState, Lobby, Profile, RankEntry, RunningTable, Standings } from "./api";
+import type {
+  BoardDto, CatalogItem, GameState, Lobby, Profile, RankEntry, RunningTable, Seat, Standings,
+  TauntOption,
+} from "./api";
+import { RULES, drawDiagram } from "./rules";
 import { RELEASES, VERSION } from "./changelog";
 import type { Credit } from "./credits";
 import { ASSET_CREDITS, creditLine } from "./credits";
@@ -59,6 +63,7 @@ export interface UiHandlers {
   focus(): void;
   rollDie(): void;
   toggleMusic(): void;
+  sendTaunt(id: string): void;
   equip(id: string, kind: CatalogItem["kind"]): void;
   rematch(): void;
 }
@@ -89,6 +94,8 @@ export class Ui {
   private filter: "open" | "running" | "all" = "all";
   /** True while the create card is being used to set up an offline game. */
   private offlineSetup = false;
+  private hasTaunts = false;
+  private boardDto: BoardDto | null = null;
   private sortKey: "name" | "players" | "age" = "players";
   private sortDesc = false;
 
@@ -135,9 +142,17 @@ export class Ui {
       $("flagpicker").classList.add("hidden");
       h.setCountry($<HTMLSelectElement>("my-country").value);
     };
+    $("btn-rules").onclick = () => this.showRules();
+    $("btn-close-rules").onclick = () => this.showMenu(this.canResume);
     $("btn-version").textContent = `v${VERSION}`;
     $("btn-version").onclick = () => this.showChangelog();
     $("btn-close-changelog").onclick = () => $("changelog").classList.add("hidden");
+    $("btn-taunt").onclick = () => this.toggleTauntMenu();
+    // Anywhere else closes it, the way a menu should.
+    document.addEventListener("pointerdown", (e) => {
+      const bar = $("tauntbar");
+      if (!bar.contains(e.target as Node)) $("taunt-menu").classList.add("hidden");
+    });
     $("btn-music").onclick = () => h.toggleMusic();
     $("btn-collection").onclick = () => this.showCollection();
     $("btn-close-collection").onclick = () => $("collection").classList.add("hidden");
@@ -355,6 +370,43 @@ export class Ui {
     }
   }
 
+  /**
+   * How to play. The board arrives after the rules screen is wired up, so it
+   * is handed in later; without it the words still stand on their own.
+   */
+  setBoard(board: BoardDto): void {
+    this.boardDto = board;
+  }
+
+  private showRules(): void {
+    this.hideAll();
+    const list = $("rules-list");
+    list.replaceChildren();
+    for (const rule of RULES) {
+      const box = document.createElement("div");
+      box.className = "rule";
+
+      const words = document.createElement("div");
+      words.className = "words";
+      const h = document.createElement("h2");
+      h.textContent = rule.title;
+      words.appendChild(h);
+      for (const line of rule.body) {
+        const p = document.createElement("p");
+        p.textContent = line;
+        words.appendChild(p);
+      }
+      box.appendChild(words);
+
+      if (rule.diagram && this.boardDto) {
+        box.appendChild(drawDiagram(this.boardDto, rule.diagram, 220));
+      }
+      list.appendChild(box);
+    }
+    $("rules").classList.remove("hidden");
+    document.body.classList.add("hud-hidden");
+  }
+
   /** The version, and behind it what each one changed. */
   private showChangelog(): void {
     $("changelog-version").textContent = `You are playing version ${VERSION}.`;
@@ -408,7 +460,7 @@ export class Ui {
   private hideAll(): void {
     for (const id of [
       "signin", "menu", "browser", "create", "joinpass", "lobby", "result",
-      "collection", "leaderboard", "flagpicker", "changelog",
+      "collection", "leaderboard", "flagpicker", "changelog", "rules",
     ]) {
       $(id).classList.add("hidden");
     }
@@ -806,6 +858,64 @@ export class Ui {
     $("seat").textContent = "Watching";
     $("gamecode").textContent = state.name;
     this.renderPlayers(state);
+  }
+
+  // ---- taunts ----
+
+  /** Fills the menu from the server's catalogue. */
+  setTaunts(options: readonly TauntOption[]): void {
+    const menu = $("taunt-menu");
+    menu.replaceChildren();
+    for (const o of options) {
+      const btn = document.createElement("button");
+      btn.textContent = o.text;
+      btn.dataset.taunt = o.id;
+      btn.onclick = () => {
+        menu.classList.add("hidden");
+        this.h.sendTaunt(o.id);
+      };
+      menu.appendChild(btn);
+    }
+    this.hasTaunts = options.length > 0;
+  }
+
+  /** Whether the taunt button is offered at all, and whether it is ready. */
+  setTauntState(available: boolean, cooldownLeft: number): void {
+    $("tauntbar").classList.toggle("hidden", !(available && this.hasTaunts));
+    const btn = $<HTMLButtonElement>("btn-taunt");
+    btn.disabled = cooldownLeft > 0;
+    btn.title = cooldownLeft > 0 ? "Give it a moment" : "Say something";
+    if (cooldownLeft > 0) $("taunt-menu").classList.add("hidden");
+  }
+
+  private toggleTauntMenu(): void {
+    $("taunt-menu").classList.toggle("hidden");
+  }
+
+  /**
+   * Shows what somebody said. The bubble carries the words even when the sound
+   * is off or blocked, which is the whole reason the text exists.
+   */
+  showTaunt(seat: Seat, name: string, text: string): void {
+    const box = document.createElement("div");
+    box.className = "bubble";
+    box.style.borderLeftColor = seatInfo(seat).css;
+
+    const who = document.createElement("div");
+    who.className = "who";
+    who.textContent = name || seatName(seat);
+    const said = document.createElement("div");
+    said.className = "said";
+    said.textContent = text;
+    box.append(who, said);
+
+    const host = $("bubbles");
+    host.appendChild(box);
+    while (host.childElementCount > 4) host.firstElementChild?.remove();
+    setTimeout(() => {
+      box.classList.add("going");
+      setTimeout(() => box.remove(), 600);
+    }, 5200);
   }
 
   /** The seat list: colour, who is on the move, and who is out (and why). */

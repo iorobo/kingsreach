@@ -7,6 +7,7 @@ import { DiceRoller } from "./dice";
 import { buildEnvironment } from "./environments";
 import type { BuiltEnvironment } from "./environments";
 import { Music } from "./music";
+import { Taunts } from "./taunts";
 import { seatInfo, seatName } from "./seats";
 import { Ui } from "./ui";
 
@@ -30,6 +31,7 @@ class Kingsreach {
   private readonly board: BoardView;
   private readonly diceRoller: DiceRoller;
   private readonly music = new Music();
+  private readonly taunts = new Taunts();
   private readonly ui: Ui;
 
   private env: BuiltEnvironment | null = null;
@@ -104,6 +106,7 @@ class Kingsreach {
       focus: () => this.focusCamera(),
       rollDie: () => void this.rollDie(),
       toggleMusic: () => this.music.toggleMute(),
+      sendTaunt: (id) => void this.sendTaunt(id),
       equip: (id, kind) => void this.equip(id, kind),
       rematch: () => void this.rematch(),
     });
@@ -127,6 +130,7 @@ class Kingsreach {
         this.ui.loadingText("Unrolling the cloth…");
         this.boardDto = await api.board();
         this.board.build(this.boardDto);
+        this.ui.setBoard(this.boardDto); // the rules diagrams draw from this
         break;
       } catch {
         this.ui.loadingText("Cannot reach the server — retrying…");
@@ -144,6 +148,15 @@ class Kingsreach {
     } catch {
       this.ui.setSteamAvailable(false);
     }
+    try {
+      const { taunts, gapMs } = await api.tauntList();
+      this.taunts.load(taunts, gapMs);
+      this.ui.setTaunts(taunts);
+    } catch {
+      /* no taunts is a missing nicety, not a broken game */
+    }
+    // The button has a cooldown to show, so it needs its own gentle tick.
+    setInterval(() => this.refreshTauntButton(), 1000);
 
     // A guess, not a fact — and never worth delaying the boot for.
     void api.geo().then((c) => c && this.ui.suggestCountry(c)).catch(() => {});
@@ -209,6 +222,30 @@ class Kingsreach {
     } finally {
       this.busy = false;
     }
+  }
+
+  /**
+   * Call something out to the table. The server has the real limit; refusing
+   * here as well only keeps the button from promising something it cannot do.
+   */
+  private async sendTaunt(id: string): Promise<void> {
+    if (!this.gameId || this.watching || this.taunts.cooldownLeft() > 0) return;
+    try {
+      await api.taunt(this.gameId, this.token, id);
+      this.taunts.noteSent();
+    } catch (e) {
+      this.taunts.noteRefused();
+      this.ui.toast(errText(e));
+    }
+    this.refreshTauntButton();
+  }
+
+  /** Keeps the button in step with the cooldown, once a second is plenty. */
+  private refreshTauntButton(): void {
+    const st = this.state;
+    const usable =
+      !!st && st.status === "active" && st.mode === "online" && !this.watching && st.you !== "all";
+    this.ui.setTauntState(usable, this.taunts.cooldownLeft());
   }
 
   private async setCountry(code: string): Promise<void> {
@@ -522,6 +559,7 @@ class Kingsreach {
     this.gameId = state.gameId;
     this.rematchOffered = false;
     this.watching = false;
+    this.taunts.reset();
     this.stopLobbyPolling();
     localStorage.setItem(STORE.game, this.gameId);
     localStorage.setItem(STORE.token, this.token);
@@ -621,12 +659,14 @@ class Kingsreach {
     }
 
     if (hasPath(state.lastMove)) this.board.showTrail(state.lastMove.path);
+    this.playIncomingTaunt(state);
     if (this.watching) {
       this.ui.updateWhileWatching(state);
       if (state.status === "finished") this.stopPolling();
       return;
     }
     this.ui.updateFromState(state, this.myTurn());
+    this.refreshTauntButton();
     await this.syncDicePhase(state);
 
     this.syncClock(state);
@@ -642,6 +682,18 @@ class Kingsreach {
       this.watchForRematch();
       void this.refreshProfile();
     }
+  }
+
+  /**
+   * Plays whatever was called out at the table, once. Your own line is shown
+   * too — you said it out loud, so seeing it is the confirmation that it left.
+   * The sound follows the music mute, since both are "noise from the game".
+   */
+  private playIncomingTaunt(state: GameState): void {
+    const fresh = this.taunts.receive(state.taunt, this.music.isMuted);
+    if (!fresh) return;
+    const from = state.seats.find((s) => s.seat === fresh.seat);
+    this.ui.showTaunt(fresh.seat, from?.name ?? "", fresh.text);
   }
 
   /** Ticks the visible countdown between polls, so it moves once a second. */

@@ -78,6 +78,8 @@ export interface GameState {
   deadline?: string;
   /** Set on a finished game once somebody has asked for another one. */
   rematchId?: string;
+  /** What was last called out at this table, if it was recent. */
+  taunt?: TauntSent;
 }
 
 /** A state plus the die just thrown, returned by the roll endpoint. */
@@ -129,6 +131,23 @@ export interface Lobby {
   locked: boolean;
   age: number;
   yours: boolean;
+}
+
+/** A line you can call out to the table. */
+export interface TauntOption {
+  id: string;
+  text: string;
+  sound: string;
+}
+
+/** A taunt somebody just called out. */
+export interface TauntSent {
+  seat: Seat;
+  id: string;
+  text: string;
+  at: string;
+  /** Changes per send, so a repeat of the same line is not mistaken for a poll echo. */
+  nonce: string;
 }
 
 /** One line of the hall of champions. */
@@ -209,6 +228,15 @@ export const api = {
 
   rematch: (id: string, token: string) =>
     request<GameState>(`/api/games/${id}/rematch`, { token }) as Promise<GameState>,
+
+  tauntList: () =>
+    request<{ taunts: TauntOption[]; gapMs: number; perGame: number }>("/api/taunts") as Promise<{
+      taunts: TauntOption[];
+      gapMs: number;
+      perGame: number;
+    }>,
+  taunt: (id: string, token: string, taunt: string) =>
+    request<{ sent: string }>(`/api/games/${id}/taunt`, { token, id: taunt }),
 
   leaderboard: (token: string) =>
     request<Standings>(`/api/leaderboard?token=${encodeURIComponent(token)}`) as Promise<Standings>,

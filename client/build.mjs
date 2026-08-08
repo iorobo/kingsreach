@@ -1,6 +1,7 @@
 // Bundles the Babylon.js client into ../web (served by the Go backend).
 // Tree-shaken @babylonjs/core keeps the payload a fraction of a Unity build.
 import { build, context } from "esbuild";
+import { createHash } from "node:crypto";
 import { cp, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { gzip } from "node:zlib";
 import { promisify } from "node:util";
@@ -78,4 +79,28 @@ if (watch) {
   for (const name of await readdir(modelDir).catch(() => [])) {
     if (name.endsWith(".glb")) await compress(path.join(modelDir, name), name);
   }
+  await stampBundleVersion();
+}
+
+/**
+ * Points index.html at the bundle by content hash.
+ *
+ * Without this the browser is free to keep serving yesterday's kingsreach.js
+ * against today's index.html — which is not theoretical: it shipped a menu
+ * whose version number never filled in, because the markup knew about the
+ * button and the cached script did not. A changing query string makes a new
+ * build a different URL, so there is nothing stale to serve.
+ */
+async function stampBundleVersion() {
+  const bundle = await readFile(mainBundle);
+  const hash = createHash("sha256").update(bundle).digest("hex").slice(0, 12);
+  const indexPath = path.join(outDir, "index.html");
+  const html = await readFile(indexPath, "utf8");
+  const stamped = html.replace(/src="kingsreach\.js(\?v=[a-f0-9]+)?"/, `src="kingsreach.js?v=${hash}"`);
+  if (stamped === html) {
+    console.warn("WARNING: could not stamp the bundle version into index.html");
+    return;
+  }
+  await writeFile(indexPath, stamped);
+  console.log(`bundle stamped as ?v=${hash}`);
 }

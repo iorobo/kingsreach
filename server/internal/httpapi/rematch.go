@@ -65,7 +65,7 @@ func (s *Server) handleRematch(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusConflict, "there is no seat for you at the rematch")
 			return
 		}
-		writeJSON(w, http.StatusOK, stateWithToken{toClientState(next, seat.Token), seat.Token})
+		writeJSON(w, http.StatusOK, stateWithToken{s.stateFor(next, seat.Token), seat.Token})
 		return
 	}
 
@@ -93,7 +93,7 @@ func (s *Server) handleRematch(w http.ResponseWriter, r *http.Request) {
 	logf("game %s: rematch opened as %s", old.ID, next.ID)
 
 	seat := seatAt(next, mySeat.Seat)
-	writeJSON(w, http.StatusOK, stateWithToken{toClientState(next, seat.Token), seat.Token})
+	writeJSON(w, http.StatusOK, stateWithToken{s.stateFor(next, seat.Token), seat.Token})
 }
 
 // rebuild lays out the same table again: same people, same computer players,

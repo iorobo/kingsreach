@@ -51,6 +51,8 @@ type Server struct {
 	// How long bots pause and how long people get to act.
 	timings Timings
 	think   *thinking
+	// What has been said at each table, and how often.
+	taunts *tauntLog
 	// now is the clock, swappable so tests need not sleep.
 	now func() time.Time
 	// BotLobbies keeps computer-hosted tables open in the browser.
@@ -67,6 +69,7 @@ func New(st store.Store, staticDir string) *Server {
 		mux: http.NewServeMux(), BotLobbies: true, geo: newGeoCache(),
 		timings: TimingsFromEnv(), think: newThinking(), now: time.Now,
 	}
+	s.taunts = newTauntLog(func() time.Time { return s.now() })
 
 	type boardOut struct {
 		Nodes []*game.Node `json:"nodes"`
@@ -96,6 +99,8 @@ func New(st store.Store, staticDir string) *Server {
 	s.mux.HandleFunc("POST /api/games/{id}/roll", s.handleRoll)
 	s.mux.HandleFunc("POST /api/games/{id}/resign", s.handleResign)
 	s.mux.HandleFunc("POST /api/games/{id}/rematch", s.handleRematch)
+	s.mux.HandleFunc("POST /api/games/{id}/taunt", s.handleTaunt)
+	s.mux.HandleFunc("GET /api/taunts", s.handleTauntList)
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("/", s.handleStatic)
 	return s
@@ -220,6 +225,10 @@ type clientState struct {
 	// RematchID appears on a finished game once somebody has asked for another
 	// go, which is how the others find out without being pushed anything.
 	RematchID string `json:"rematchId,omitempty"`
+	// Taunt is whatever was last said at this table, if it was said recently.
+	// It rides the state rather than needing its own poll — the client is
+	// already asking for this every second or so.
+	Taunt *sentTaunt `json:"taunt,omitempty"`
 }
 
 // stateWithRoll adds the die just thrown, so the client animates that value.
@@ -292,6 +301,14 @@ type stateWithToken struct {
 	Token string `json:"token"`
 }
 
+// stateFor is toClientState plus whatever is only known to this server rather
+// than to the saved game — currently the taunt somebody just called out.
+func (s *Server) stateFor(rec *store.GameRecord, token string) *clientState {
+	out := toClientState(rec, token)
+	out.Taunt = s.taunts.current(rec.ID)
+	return out
+}
+
 // ---- static files ----
 
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
@@ -307,6 +324,7 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 		rel = "index.html"
 	}
 	full := filepath.Join(s.staticDir, filepath.FromSlash(rel))
+	setCaching(w, r, rel)
 	if fi, err := os.Stat(full); err == nil && !fi.IsDir() {
 		// Prefer a pre-compressed sibling (client build writes .gz next to the
 		// bundle) so the big JS payload ships at a fraction of its size.
@@ -336,6 +354,26 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.NotFound(w, r)
+}
+
+// setCaching keeps the entry point fresh and lets everything else be held.
+//
+// The build stamps index.html with the bundle's content hash, so a new build
+// is a new URL and can be cached hard. index.html itself is the pointer to
+// that URL and must always be rechecked — with no header at all the browser
+// guesses, and it guessed wrong: a stale script against fresh markup, which
+// showed up as a menu whose version number never filled in.
+func setCaching(w http.ResponseWriter, r *http.Request, rel string) {
+	if rel == "index.html" || strings.HasSuffix(rel, ".html") {
+		w.Header().Set("Cache-Control", "no-cache")
+		return
+	}
+	if r.URL.Query().Get("v") != "" {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		return
+	}
+	// Unversioned assets: cache briefly, but always revalidate afterwards.
+	w.Header().Set("Cache-Control", "public, max-age=300, must-revalidate")
 }
 
 func acceptsGzip(r *http.Request) bool {

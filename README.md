@@ -19,8 +19,9 @@ opening round, and knock-outs instead of instant defeat.
 | Database | PostgreSQL (in-memory fallback when `DATABASE_URL` is empty) |
 | Hosting | Docker (single container) — designed for **Easypanel** |
 
-The bundle is ~1.6 MB (≈380 KB gzipped) and the Go server serves the pre-compressed file
-automatically. A minimal 2D fallback client stays embedded in the binary at `/dev` — handy for
+The bundle is served under a content hash (`kingsreach.js?v=…`) so a new release can never be
+answered with a cached copy of the last one, while `index.html` itself is always revalidated.
+The Go server serves the pre-compressed file automatically. A minimal 2D fallback client stays embedded in the binary at `/dev` — handy for
 debugging the API without the 3D layer.
 
 ---
@@ -222,6 +223,29 @@ by putting its code in `hostOrigins` and its phrases in `tableNamesByLang`, both
 `POST /api/profile` `{name, country}` ·
 `GET /api/profile?token` · `POST /api/profile/update` · `POST /api/profile/equip` ·
 `GET /api/auth/steam/login` · `GET /api/auth/steam/return` · `GET /healthz`.
+
+## Taunts
+
+The 💬 button calls a line out to the table: nine recorded phrases, from *Nice
+move* to *Bow now, save yourself the trouble later*. Every one also appears as a
+speech bubble in the corner, because plenty of people play with the sound off
+and a taunt nobody can hear is not a taunt.
+
+Two limits, both enforced on the server rather than by greying out the button —
+a disabled button has never stopped anybody determined. Eight seconds between
+taunts, and twelve per game: the gap alone would still allow one every eight
+seconds for an entire match.
+
+Add a line by dropping the audio in `client/static/audio/taunts/` and adding a
+row to `taunts` in `server/internal/httpapi/taunts.go`. **The text must be what
+the voice actually says** — it is what somebody with the sound off reads
+instead, so a mismatch is two different taunts wearing one name.
+
+## How to play
+
+The menu has a **How to play** screen with the rules and diagrams. The diagrams
+are drawn from the board the server sends, not from hand-made copies, so an
+illustration cannot quietly drift away from the game it illustrates.
 
 ## Changelog
 

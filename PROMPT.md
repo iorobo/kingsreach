@@ -206,6 +206,8 @@ web/                       ← build output (generated, git-ignored)
 | `GET /api/geo` | – | `{"country":"NL"}` — the country guessed from the caller's address, `""` when unknown. Never an error |
 | `GET /api/leaderboard` | `?token=…` | `{minWins, entries:[…], you, winsNeeded}` — see §3.6 |
 | `GET /api/games/{id}/watch` | `?v=N` | the state with no seat (`you:""`), or `204` when version is still `N`. Online games only |
+| `GET /api/taunts` | – | the catalogue: `{taunts:[{id,text,sound}], gapMs, perGame}` |
+| `POST /api/games/{id}/taunt` | `{"token","id"}` | calls a line out to the table; `429` when the limiter says wait |
 | `GET /api/games/{id}` | `?token=…&v=N` | full state, or `204` if version still `N` |
 | `GET /api/games/{id}/moves` | `?token=…&from=nodeId` | `{moves:[{to, path:[…]}]}` legal moves for that piece |
 | `POST /api/games/{id}/move` | `{"token","from","to"}` | new state (or `409` + error for illegal moves) |
@@ -452,7 +454,29 @@ games are refused outright — a shared screen belongs to the people round it.
 The client keeps the same board and drops the controls that need a seat (`body.watching`). A
 spectator with a Resign button is a bug report waiting to happen.
 
-### 3.9 The move clock
+### 3.9 Taunts
+
+Nine recorded lines, catalogued on the server so the *sound* and the *words* can never disagree —
+the text is what a player with the sound off reads instead of hearing it, which makes a mismatch
+two different taunts wearing one name, not a cosmetic slip.
+
+Two limits, both server-side because a disabled button stops nobody: `tauntGap` between sends, and
+`tauntsPerGame` overall. The second is not redundant — the gap alone permits one taunt every eight
+seconds for an entire match, which is exactly the behaviour being prevented.
+
+A taunt rides the game state rather than having its own poll, and **bumps the version**. Without
+that the opponent's poll answers "nothing changed" and the taunt is never delivered. It lives in
+memory with a short shelf life: it is over in seconds and has no business in the saved game. Each
+carries a nonce so the client can tell a repeated line from the same line arriving in two polls.
+
+### 3.10 How to play
+
+`rules.ts` renders the rules with diagrams **drawn from the board the server sends**. Hand-drawn
+boards drift the moment anybody touches the layout, and a picture of the rules that disagrees with
+the rules is worse than no picture. Each diagram frames what it is about rather than always showing
+all 55 fields, which at card size made a stone eight pixels across.
+
+### 3.11 The move clock
 
 150 seconds to roll or move, or you forfeit the seat. Enforced in the server tick rather than on
 request, or closing a laptop would stall the table indefinitely — note that tick used to skip games
@@ -468,7 +492,7 @@ player cannot see is a trap, and rendering from the deadline means a slow poll c
 numbers jump. Bots are exempt; so is offline, where arming it would show a countdown that nothing
 enforces.
 
-### 3.10 Engine invariants (unit-tested)
+### 3.12 Engine invariants (unit-tested)
 
 - Board: 55 nodes, 78 edges, exactly 6 gold edges, Throne degree 6, kings start at `±8,0`.
 - Exact-step DFS: a 2 can never "bounce" back to its start; blocked first steps ⇒ no moves.

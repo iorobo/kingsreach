@@ -155,7 +155,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logf("game %s created (mode=%s, players=%d, code=%s)", rec.ID, mode, players, rec.Code)
-	writeJSON(w, http.StatusOK, stateWithToken{toClientState(rec, token), token})
+	writeJSON(w, http.StatusOK, stateWithToken{s.stateFor(rec, token), token})
 }
 
 // handleJoin takes a free seat at a table from the lobby browser.
@@ -234,7 +234,7 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logf("game %s joined (%d seats free)", rec.ID, rec.FreeSeats())
-	writeJSON(w, http.StatusOK, stateWithToken{toClientState(rec, token), token})
+	writeJSON(w, http.StatusOK, stateWithToken{s.stateFor(rec, token), token})
 }
 
 // loadForToken fetches the game and checks the caller holds a seat at it.
@@ -278,7 +278,7 @@ func (s *Server) handleGetState(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, toClientState(rec, token))
+	writeJSON(w, http.StatusOK, s.stateFor(rec, token))
 }
 
 func (s *Server) handleMoves(w http.ResponseWriter, r *http.Request) {
@@ -380,7 +380,7 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 		logf("game %s finished: winner=%s (%s)", rec.ID, rec.State.Winner, rec.State.WinReason)
 		s.awardStats(r.Context(), rec)
 	}
-	writeJSON(w, http.StatusOK, toClientState(rec, req.Token))
+	writeJSON(w, http.StatusOK, s.stateFor(rec, req.Token))
 }
 
 // handleRoll throws one die for the caller's seat. The value is generated here
@@ -430,7 +430,7 @@ func (s *Server) handleRoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logf("game %s: %s threw a %d", rec.ID, seat, value)
-	writeJSON(w, http.StatusOK, stateWithRoll{toClientState(rec, req.Token), string(seat), value})
+	writeJSON(w, http.StatusOK, stateWithRoll{s.stateFor(rec, req.Token), string(seat), value})
 }
 
 // rollingSeat picks which seat a token throws for. Holding the whole table
@@ -497,5 +497,5 @@ func (s *Server) handleResign(w http.ResponseWriter, r *http.Request) {
 	if rec.Status == "finished" {
 		s.awardStats(r.Context(), rec)
 	}
-	writeJSON(w, http.StatusOK, toClientState(rec, req.Token))
+	writeJSON(w, http.StatusOK, s.stateFor(rec, req.Token))
 }

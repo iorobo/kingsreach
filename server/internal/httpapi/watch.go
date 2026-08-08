@@ -41,5 +41,5 @@ func (s *Server) handleWatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// An empty token yields a state with no seat, which is what a watcher is.
-	writeJSON(w, http.StatusOK, toClientState(rec, ""))
+	writeJSON(w, http.StatusOK, s.stateFor(rec, ""))
 }

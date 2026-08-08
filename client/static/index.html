@@ -105,6 +105,17 @@
   .release li { font-size: 14px; margin-bottom: 5px; line-height: 1.45; color: var(--cream); }
   .release.old li { color: #a99e8c; }
 
+  /* Rules. Diagrams are drawn from the real board, so they cannot drift. */
+  .rule { text-align: left; margin-bottom: 22px; display: flex; gap: 16px; align-items: flex-start; }
+  .rule .words { flex: 1; min-width: 0; }
+  .rule h2 { font-size: 17px; color: var(--gold-pale); margin: 0 0 6px; letter-spacing: 1px; }
+  .rule p { font-size: 14px; line-height: 1.55; margin: 0 0 6px; color: var(--cream); }
+  .rule .diagram { border-radius: 10px; border: 1px solid #3c3733; flex: none; }
+  @media (max-width: 620px) {
+    .rule { flex-direction: column; align-items: stretch; }
+    .rule .diagram { align-self: center; }
+  }
+
   #topbar, #bottombar {
     position: fixed; left: 0; right: 0; z-index: 10; background: var(--bar);
     display: flex; align-items: center; gap: 10px; padding: 9px 14px;
@@ -264,6 +275,41 @@
   .credit { color: #7d7469; font-size: 11px; font-style: italic; margin-top: 14px; line-height: 1.5; }
   .credit a { color: #8d8377; }
 
+  /* Taunts. The bubble is not a nicety: it is what somebody with the sound
+     off reads instead of hearing the line, so it says exactly the same words. */
+  #bubbles {
+    position: fixed; right: 12px; top: 56px; z-index: 24;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+    pointer-events: none; max-width: min(340px, 60vw);
+  }
+  .hud-hidden #bubbles, .hud-hidden #tauntbar { display: none; }
+  .bubble {
+    background: var(--card); border: 1px solid var(--line); border-left-width: 4px;
+    border-radius: 12px 12px 4px 12px; padding: 8px 12px; text-align: right;
+    backdrop-filter: blur(6px); box-shadow: 0 8px 24px rgba(0,0,0,.45);
+    animation: bubble-in .22s ease-out;
+    transition: opacity .5s ease, transform .5s ease;
+  }
+  .bubble.going { opacity: 0; transform: translateY(-6px); }
+  .bubble .who { font-size: 11px; color: #a99e8c; letter-spacing: 1px; text-transform: uppercase; }
+  .bubble .said { font-size: 15px; color: var(--cream); margin-top: 2px; }
+  @keyframes bubble-in { from { opacity: 0; transform: translateY(8px) scale(.96); } }
+
+  #tauntbar { position: fixed; right: 12px; bottom: 58px; z-index: 25; }
+  #btn-taunt { font-size: 18px; padding: 7px 12px; background: var(--bar); border-color: var(--line); backdrop-filter: blur(6px); }
+  #btn-taunt:disabled { opacity: .4; }
+  #taunt-menu {
+    position: absolute; right: 0; bottom: 46px; width: min(280px, 78vw);
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 6px; box-shadow: 0 18px 50px rgba(0,0,0,.6);
+  }
+  #taunt-menu button {
+    display: block; width: 100%; text-align: left; font-size: 14px;
+    padding: 8px 10px; margin: 0; border: none; background: none; border-radius: 8px;
+  }
+  #taunt-menu button:hover:not(:disabled) { background: rgba(217,168,58,.14); filter: none; }
+  #taunt-menu .spent { color: #7d7469; font-size: 12px; font-style: italic; padding: 6px 10px; }
+
   #toast {
     position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%) translateY(14px);
     background: #4a2a24; border: 1px solid #a05242; color: #f3d9c8; padding: 11px 22px; border-radius: 10px;
@@ -325,6 +371,7 @@
       <button class="primary wide" id="btn-browse">Find a table</button>
       <button class="primary wide" id="btn-create">Open your own table</button>
       <button class="ghost wide" id="btn-offline">Offline — pass the mouse around</button>
+      <button class="ghost wide" id="btn-rules">How to play</button>
       <button class="ghost wide" id="btn-leaderboard">Hall of champions</button>
       <button class="ghost wide" id="btn-collection">Collection — skins &amp; places</button>
       <button class="ghost wide hidden" id="btn-resume">Resume last game</button>
@@ -414,6 +461,15 @@
     </div>
   </div>
 
+  <div id="rules" class="overlay hidden">
+    <div class="card wide">
+      <h1 style="font-size:28px">How to play</h1>
+      <div class="stats">March your king to the Gilded Throne.</div>
+      <div id="rules-list"></div>
+      <button class="primary wide" id="btn-close-rules" style="margin-top:12px">Close</button>
+    </div>
+  </div>
+
   <div id="changelog" class="overlay hidden">
     <div class="card">
       <h1 style="font-size:28px">What changed</h1>
@@ -475,6 +531,13 @@
       <div class="hint hidden" id="rematch-note"></div>
       <button class="ghost wide" id="btn-back">Back to the great hall</button>
     </div>
+  </div>
+
+  <div id="bubbles"></div>
+
+  <div id="tauntbar" class="hidden">
+    <button id="btn-taunt" title="Say something">💬</button>
+    <div id="taunt-menu" class="hidden"></div>
   </div>
 
   <div id="music">

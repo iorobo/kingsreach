@@ -17,6 +17,17 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: "0.7",
+    date: "2026-08-08",
+    headline: "Say something, and learn how to play.",
+    changes: [
+      "Taunts: nine recorded lines you can call out to the table, with a speech bubble so they land even with the sound off. Eight seconds between them and twelve a game, so nobody can drown the board.",
+      "A How to play screen, with diagrams drawn from the real board.",
+      "The games in progress are real games now — the computer plays a few matches against itself, and you can watch any of them.",
+      "A new version can no longer be answered with a cached copy of the last one.",
+    ],
+  },
+  {
     version: "0.6",
     date: "2026-08-07",
     headline: "The computer learned to play, and nobody can stall any more.",
