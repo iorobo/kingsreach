@@ -32,6 +32,21 @@ export interface SeatDto {
   /** Played by the computer, and at which difficulty. */
   bot?: boolean;
   level?: string;
+  /** The stone colour this seat was given, which need not be the seat's own. */
+  colour?: ColourId;
+  /** Side in a team game; absent or 0 in a free-for-all. */
+  team?: number;
+  /** Their clock has run out and anyone else at the table may boot them. */
+  overdue?: boolean;
+}
+
+export type ColourId = "obsidian" | "jade" | "amber" | "ember" | "azure" | "plum";
+
+export interface ColourOption {
+  id: ColourId;
+  name: string;
+  /** The seat this colour belongs to when nobody asks for anything. */
+  seat: Seat;
 }
 
 export interface DiceThrow {
@@ -80,6 +95,10 @@ export interface GameState {
   rematchId?: string;
   /** What was last called out at this table, if it was recent. */
   taunt?: TauntSent;
+  /** Two against two, and the two options that go with it. */
+  teams?: boolean;
+  friendlyFire?: boolean;
+  inherit?: boolean;
 }
 
 /** A state plus the die just thrown, returned by the roll endpoint. */
@@ -117,7 +136,44 @@ export interface Profile {
   equippedSkin: string;
   equippedEnv: string;
   equippedBoard: string;
+  /** Preferred stone colour; "" when you do not mind which. */
+  colour: ColourId | "";
   unlocked: string[];
+}
+
+/** A Steam friend who has played Kingsreach. */
+export interface Friend {
+  profileId: string;
+  name: string;
+  avatar?: string;
+  country?: string;
+  wins: number;
+  /** The table they are at right now, if any. */
+  playing?: string;
+  playingName?: string;
+}
+
+/** An invitation to somebody else's table. */
+export interface Invite {
+  id: string;
+  gameId: string;
+  from: string;
+  table: string;
+  seats: number;
+}
+
+/** A table you hold a seat at, for the "where was I?" list. */
+export interface MyTable {
+  gameId: string;
+  name: string;
+  status: "waiting" | "active";
+  seat: Seat;
+  /** The seat token, so a closed tab is not a lost game. */
+  token: string;
+  /** Waiting on you, right now. */
+  yours: boolean;
+  ply: number;
+  free: number;
 }
 
 /** A table in the lobby browser. */
@@ -225,8 +281,25 @@ export const api = {
   getProfile: (token: string) => request<Profile>(`/api/profile?token=${encodeURIComponent(token)}`) as Promise<Profile>,
   updateProfile: (token: string, name: string, country: string) =>
     request<Profile>("/api/profile/update", { token, name, country }) as Promise<Profile>,
-  equip: (token: string, what: { skin?: string; env?: string; board?: string }) =>
+  equip: (token: string, what: { skin?: string; env?: string; board?: string; colour?: string }) =>
     request<Profile>("/api/profile/equip", { token, ...what }) as Promise<Profile>,
+  colours: async () => (await request<{ colours: ColourOption[] }>("/api/colours"))!.colours,
+
+  friends: (token: string) =>
+    request<{ friends: Friend[]; total?: number; reason?: string }>(
+      `/api/friends?token=${encodeURIComponent(token)}`,
+    ) as Promise<{ friends: Friend[]; total?: number; reason?: string }>,
+  myTables: async (token: string) =>
+    (await request<{ tables: MyTable[] }>(`/api/tables?token=${encodeURIComponent(token)}`))!.tables,
+  invites: async (token: string) =>
+    (await request<{ invites: Invite[] }>(`/api/invites?token=${encodeURIComponent(token)}`))!.invites,
+  invite: (token: string, gameId: string, profile: string) =>
+    request<{ ok: boolean }>("/api/invites", { token, gameId, profile }),
+  dismissInvite: (token: string, id: string) =>
+    request<{ ok: boolean }>("/api/invites/dismiss", { token, id }),
+
+  boot: (id: string, token: string, seat: Seat) =>
+    request<GameState>(`/api/games/${id}/boot`, { token, seat }) as Promise<GameState>,
 
   rematch: (id: string, token: string) =>
     request<GameState>(`/api/games/${id}/rematch`, { token }) as Promise<GameState>,
@@ -254,6 +327,9 @@ export const api = {
     profile: string;
     name?: string;
     password?: string;
+    teams?: boolean;
+    friendlyFire?: boolean;
+    inherit?: boolean;
   }) => request<GameState>("/api/games", opts) as Promise<GameState>,
   joinGame: (gameId: string, password: string, profile: string) =>
     request<GameState>("/api/games/join", { gameId, password, profile }) as Promise<GameState>,

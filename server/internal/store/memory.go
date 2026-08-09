@@ -18,12 +18,14 @@ type Memory struct {
 	byCode      map[string]string
 	profByID    map[string]*Profile
 	profByToken map[string]string
+	invites     map[string]*Invite
 }
 
 func NewMemory() *Memory {
 	return &Memory{
 		byID: map[string]*GameRecord{}, byCode: map[string]string{},
 		profByID: map[string]*Profile{}, profByToken: map[string]string{},
+		invites: map[string]*Invite{},
 	}
 }
 
@@ -187,15 +189,109 @@ func (m *Memory) GetProfileByToken(ctx context.Context, token string) (*Profile,
 	return &cp, nil
 }
 
-func (m *Memory) UpdateProfileEquip(ctx context.Context, id, skin, env, board string) error {
+func (m *Memory) UpdateProfileEquip(ctx context.Context, id, skin, env, board, colour string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.profByID[id]
 	if !ok {
 		return ErrNotFound
 	}
-	p.EquippedSkin, p.EquippedEnv, p.EquippedBoard = skin, env, board
+	p.EquippedSkin, p.EquippedEnv, p.EquippedBoard, p.Colour = skin, env, board, colour
 	p.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+func (m *Memory) ProfilesBySteamIDs(ctx context.Context, steamIDs []string) ([]*Profile, error) {
+	if len(steamIDs) == 0 {
+		return nil, nil
+	}
+	want := make(map[string]bool, len(steamIDs))
+	for _, id := range steamIDs {
+		want[id] = true
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []*Profile{}
+	for _, p := range m.profByID {
+		if p.SteamID != "" && want[p.SteamID] {
+			q := *p
+			out = append(out, &q)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Wins != out[j].Wins {
+			return out[i].Wins > out[j].Wins
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
+func (m *Memory) ListForProfile(ctx context.Context, profileID string, limit int) ([]*GameRecord, error) {
+	if profileID == "" {
+		return nil, nil
+	}
+	out := m.list(func(r *GameRecord) bool {
+		if r.Status == "finished" || r.Mode != "online" {
+			return false
+		}
+		_, ok := r.SeatForProfile(profileID)
+		return ok
+	}, limit)
+	// Most recently touched first: this is a "where was I?" list, and the game
+	// somebody is waiting on ought to be at the top.
+	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	return out, nil
+}
+
+func (m *Memory) CreateInvite(ctx context.Context, inv *Invite) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inv.CreatedAt = time.Now().UTC()
+	// One standing invitation per player per table, matching the unique index
+	// the real store enforces — and, like the upsert there, keeping the
+	// existing row's id. A client holding an id from an earlier list must
+	// still be able to dismiss it after the host clicked invite again.
+	for id, existing := range m.invites {
+		if existing.GameID == inv.GameID && existing.ToID == inv.ToID {
+			inv.ID = id
+			break
+		}
+	}
+	cp := *inv
+	m.invites[inv.ID] = &cp
+	return nil
+}
+
+func (m *Memory) InvitesFor(ctx context.Context, profileID string) ([]*Invite, error) {
+	if profileID == "" {
+		return nil, nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []*Invite{}
+	for _, inv := range m.invites {
+		if inv.ToID != profileID {
+			continue
+		}
+		// An invitation to a table that has filled up or gone away is not an
+		// invitation any more.
+		if rec, ok := m.byID[inv.GameID]; !ok || rec.Status != "waiting" {
+			continue
+		}
+		cp := *inv
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *Memory) DeleteInvite(ctx context.Context, id, profileID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if inv, ok := m.invites[id]; ok && inv.ToID == profileID {
+		delete(m.invites, id)
+	}
 	return nil
 }
 

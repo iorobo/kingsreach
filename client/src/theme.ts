@@ -80,6 +80,31 @@ export function mat(
   return m;
 }
 
+/**
+ * A soft round dot, for particles.
+ *
+ * Drawn rather than shipped, and specifically *not* the famous one-pixel
+ * base64 GIF: that one is the transparent pixel every tracking image uses, so
+ * a particle system given it renders a few hundred perfectly invisible sparks
+ * while getActiveCount() cheerfully reports a hundred and seventy. Asked twice
+ * now, hence a shared helper.
+ */
+export function softDot(scene: Scene): DynamicTexture {
+  const size = 32;
+  const tex = new DynamicTexture("spark", { width: size, height: size }, scene, false);
+  const ctx = tex.getContext() as CanvasRenderingContext2D;
+  const half = size / 2;
+  const fade = ctx.createRadialGradient(half, half, 0, half, half, half);
+  fade.addColorStop(0, "rgba(255,255,255,1)");
+  fade.addColorStop(0.45, "rgba(255,255,255,0.8)");
+  fade.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = fade;
+  ctx.fillRect(0, 0, size, size);
+  tex.update();
+  tex.hasAlpha = true;
+  return tex;
+}
+
 export function checkerTexture(scene: Scene, a: string, b: string): DynamicTexture {
   const size = 256;
   const tex = new DynamicTexture("checker", { width: size, height: size }, scene, false);

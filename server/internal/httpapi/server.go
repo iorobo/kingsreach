@@ -53,6 +53,8 @@ type Server struct {
 	think   *thinking
 	// What has been said at each table, and how often.
 	taunts *tauntLog
+	// Steam friend lists, cached — Steam rate-limits and the menu asks often.
+	friends *friendCache
 	// now is the clock, swappable so tests need not sleep.
 	now func() time.Time
 	// BotLobbies keeps computer-hosted tables open in the browser.
@@ -71,6 +73,7 @@ func New(st store.Store, staticDir string) *Server {
 		timings: TimingsFromEnv(), think: newThinking(), now: time.Now,
 	}
 	s.taunts = newTauntLog(func() time.Time { return s.now() })
+	s.friends = newFriendCache(func() time.Time { return s.now() })
 
 	type boardOut struct {
 		Nodes []*game.Node `json:"nodes"`
@@ -101,7 +104,14 @@ func New(st store.Store, staticDir string) *Server {
 	s.mux.HandleFunc("POST /api/games/{id}/resign", s.handleResign)
 	s.mux.HandleFunc("POST /api/games/{id}/rematch", s.handleRematch)
 	s.mux.HandleFunc("POST /api/games/{id}/taunt", s.handleTaunt)
+	s.mux.HandleFunc("POST /api/games/{id}/boot", s.handleBoot)
 	s.mux.HandleFunc("GET /api/taunts", s.handleTauntList)
+	s.mux.HandleFunc("GET /api/colours", s.handleColours)
+	s.mux.HandleFunc("GET /api/friends", s.handleFriends)
+	s.mux.HandleFunc("GET /api/tables", s.handleMyTables)
+	s.mux.HandleFunc("GET /api/invites", s.handleInvites)
+	s.mux.HandleFunc("POST /api/invites", s.handleInvite)
+	s.mux.HandleFunc("POST /api/invites/dismiss", s.handleInviteDismiss)
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("/", s.handleStatic)
 	return s
@@ -196,6 +206,13 @@ type clientSeat struct {
 	Rank    int    `json:"rank,omitempty"`  // hall-of-champions place, 0 = unranked
 	Bot     bool   `json:"bot,omitempty"`   // played by the computer
 	Level   string `json:"level,omitempty"` // that computer player's difficulty
+	// Colour is what this seat is actually wearing, which is no longer the
+	// same thing as which seat it is.
+	Colour string `json:"colour,omitempty"`
+	Team   int    `json:"team,omitempty"`
+	// Overdue says this seat's clock has run out and anyone else may boot it.
+	// Derived rather than stored: it is a fact about now, not about the game.
+	Overdue bool `json:"overdue,omitempty"`
 }
 
 type clientState struct {
@@ -230,6 +247,11 @@ type clientState struct {
 	// It rides the state rather than needing its own poll — the client is
 	// already asking for this every second or so.
 	Taunt *sentTaunt `json:"taunt,omitempty"`
+	// How the host set the table up. The rules live in the state; these are
+	// here so the HUD can say what game everybody thinks they are playing.
+	Teams        bool `json:"teams,omitempty"`
+	FriendlyFire bool `json:"friendlyFire,omitempty"`
+	Inherit      bool `json:"inherit,omitempty"`
 }
 
 // stateWithRoll adds the die just thrown, so the client animates that value.
@@ -254,6 +276,7 @@ func toClientState(rec *store.GameRecord, token string) *clientState {
 		Winner: string(st.Winner), WinReason: st.WinReason,
 		Version: rec.Version, Ply: st.Ply, Capturing: st.CapturesAllowed(),
 		Dice: st.Dice, RematchID: rec.RematchID,
+		Teams: rec.Teams, FriendlyFire: rec.FriendlyFire, Inherit: rec.Inherit,
 	}
 	if !st.TurnDeadline.IsZero() {
 		out.Deadline = st.TurnDeadline.UTC().Format(time.RFC3339)
@@ -270,6 +293,7 @@ func toClientState(rec *store.GameRecord, token string) *clientState {
 			You: seat.Taken && seat.Token == token, Out: st.IsOut(seat.Seat),
 			Name: seat.Name, Avatar: seat.Avatar, Country: seat.Country,
 			Rank: seat.Rank, Bot: seat.Bot, Level: seat.Difficulty,
+			Colour: colourOf(&seat), Team: seat.Team,
 		}
 		for _, k := range st.Out {
 			if k.Seat == seat.Seat {
@@ -307,6 +331,15 @@ type stateWithToken struct {
 func (s *Server) stateFor(rec *store.GameRecord, token string) *clientState {
 	out := toClientState(rec, token)
 	out.Taunt = s.taunts.current(rec.ID)
+	// Whose clock has actually run out is a fact about the current moment, so
+	// it is worked out per response rather than stored on the seat.
+	for _, c := range rec.State.Overdue(s.now()) {
+		for i := range out.Seats {
+			if out.Seats[i].Seat == string(c) && !out.Seats[i].Bot {
+				out.Seats[i].Overdue = true
+			}
+		}
+	}
 	return out
 }
 

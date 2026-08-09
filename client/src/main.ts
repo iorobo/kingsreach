@@ -1,16 +1,20 @@
 import { ArcRotateCamera, Engine, GlowLayer, Matrix, Plane, PointerEventTypes, Scene, Vector3 } from "./babylon";
 import type { Mesh, PointerInfo, ShadowGenerator } from "./babylon";
 import { ApiError, api, hasPath } from "./api";
-import type { BoardDto, CatalogItem, GameState, MoveOption, Profile, Seat } from "./api";
+import type {
+  BoardDto, CatalogItem, GameState, Invite, MoveOption, MyTable, Profile, Seat,
+} from "./api";
 import { BoardView } from "./board";
 import { DiceRoller } from "./dice";
 import { buildEnvironment } from "./environments";
+import { Effects, unlockEffects } from "./effects";
 import { Finale } from "./finale";
 import type { BuiltEnvironment } from "./environments";
 import { Music } from "./music";
 import { Taunts } from "./taunts";
 import { seatInfo, seatName } from "./seats";
 import { Ui } from "./ui";
+import type { TableOptions } from "./ui";
 
 const STORE = { profile: "kr_profile", game: "kr_game", token: "kr_token" };
 const POLL_MS = 1200;
@@ -34,6 +38,7 @@ class Kingsreach {
   private readonly music = new Music();
   private readonly taunts = new Taunts();
   private readonly finale: Finale;
+  private readonly effects: Effects;
   private readonly ui: Ui;
 
   private env: BuiltEnvironment | null = null;
@@ -90,6 +95,7 @@ class Kingsreach {
 
     this.diceRoller = new DiceRoller(this.scene);
     this.finale = new Finale(this.scene);
+    this.effects = new Effects(this.scene);
     this.ui = new Ui({
       steamLogin: () => this.steamLogin(),
       guest: (name, country) => void this.signInAsGuest(name, country),
@@ -111,11 +117,28 @@ class Kingsreach {
       toggleMusic: () => this.music.toggleMute(),
       sendTaunt: (id) => void this.sendTaunt(id),
       equip: (id, kind) => void this.equip(id, kind),
+      setColour: (id) => void this.setColour(id),
       rematch: () => void this.rematch(),
+      friends: () => void this.showFriends(),
+      invite: (profileId) => void this.invite(profileId),
+      acceptInvite: (inv) => void this.acceptInvite(inv),
+      dismissInvite: (id) => void this.dismissInvite(id),
+      openTable: (table) => void this.openTable(table),
+      boot: (seat) => void this.boot(seat),
     });
 
-    this.music.observe(() => this.ui.setMusic(this.music.isMuted, this.music.current, this.music.playlist));
+    this.music.observe(() => {
+      this.ui.setMusic(this.music.isMuted, this.music.current, this.music.playlist);
+      // The move and strike sounds are noise from the game too, so they follow
+      // the same switch — nobody means "mute the music but keep the clicks".
+      this.effects.muted = this.music.isMuted;
+    });
     this.music.attachTo(window);
+    this.effects.muted = this.music.isMuted;
+    // Web Audio starts suspended until a real gesture, the same rule the music
+    // lives under; the first click anywhere wakes both.
+    window.addEventListener("pointerdown", unlockEffects, { once: true });
+    window.addEventListener("keydown", unlockEffects, { once: true });
 
     this.scene.onPointerObservable.add((pi) => this.onPointer(pi));
     this.engine.runRenderLoop(() => this.scene.render());
@@ -174,7 +197,7 @@ class Kingsreach {
     if (!this.profile) {
       this.ui.showSignIn();
     } else {
-      this.ui.showMenu(await this.checkResumable());
+      this.toMenu(await this.checkResumable());
     }
     this.ui.ready();
   }
@@ -219,7 +242,7 @@ class Kingsreach {
       localStorage.setItem(STORE.profile, this.profile.token);
       this.ui.setData(this.profile, this.catalog);
       this.applyEnvironment(this.profile.equippedEnv);
-      this.ui.showMenu(await this.checkResumable());
+      this.toMenu(await this.checkResumable());
     } catch (e) {
       this.ui.toast(errText(e));
     } finally {
@@ -346,6 +369,127 @@ class Kingsreach {
     }
   }
 
+  /**
+   * Records which stones the player would rather have. It changes nothing
+   * about a game already running — colours are handed out when the opening
+   * dice settle, and pieces that changed colour mid-game would be worse than
+   * not getting your first choice.
+   */
+  private async setColour(id: string): Promise<void> {
+    if (!this.profile || this.busy) return;
+    try {
+      this.profile = await api.equip(this.profile.token, { colour: id });
+      this.ui.setData(this.profile, this.catalog);
+      this.ui.toast(
+        id === "none"
+          ? "Any colour will do."
+          : "Noted — yours at the next table, if nobody beats you to it.",
+        true,
+      );
+    } catch (e) {
+      this.ui.toast(errText(e));
+    }
+  }
+
+  // ---- friends, invitations, several games at once ----
+
+  /**
+   * Every route back to the menu goes through here, so the "where was I?" list
+   * and any waiting invitations are never a screen behind. Fetched rather than
+   * cached: you get here after finishing, leaving or abandoning a game, which
+   * is exactly when the list has changed.
+   */
+  private toMenu(canResume: boolean): void {
+    this.ui.showMenu(canResume);
+    void this.refreshTables();
+  }
+
+  private async showFriends(): Promise<void> {
+    if (!this.profile) return;
+    try {
+      const res = await api.friends(this.profile.token);
+      this.ui.showFriends(res.friends, res.reason ?? "", res.total ?? res.friends.length);
+    } catch (e) {
+      this.ui.toast(errText(e));
+    }
+  }
+
+  private async invite(profileId: string): Promise<void> {
+    if (!this.profile || !this.gameId) return;
+    try {
+      await api.invite(this.profile.token, this.gameId, profileId);
+      this.ui.toast("Invitation sent.", true);
+    } catch (e) {
+      this.ui.toast(errText(e));
+    }
+  }
+
+  private async acceptInvite(inv: Invite): Promise<void> {
+    if (this.profile) void api.dismissInvite(this.profile.token, inv.id);
+    await this.joinGame(inv.gameId, "");
+  }
+
+  private async dismissInvite(id: string): Promise<void> {
+    if (!this.profile) return;
+    try {
+      await api.dismissInvite(this.profile.token, id);
+    } catch {
+      /* it may already be gone; the refresh below settles it either way */
+    }
+    void this.refreshTables();
+  }
+
+  /**
+   * Walks back into a table you already hold a seat at.
+   *
+   * The seat token comes with the list, so this needs no join: a table you
+   * left is still yours, and asking to join it again would be answered with
+   * the same seat anyway.
+   */
+  private async openTable(table: MyTable): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      const state = await api.getGame(table.gameId, table.token);
+      this.gameId = table.gameId;
+      this.token = table.token;
+      this.watching = false;
+      this.enterGame(state);
+    } catch (e) {
+      this.ui.toast(errText(e));
+      void this.refreshTables();
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** The menu's "where was I?" list, plus anyone asking you to their table. */
+  private async refreshTables(): Promise<void> {
+    if (!this.profile) {
+      this.ui.showMyTables([], []);
+      return;
+    }
+    const token = this.profile.token;
+    const [tables, invites] = await Promise.all([
+      api.myTables(token).catch(() => [] as MyTable[]),
+      api.invites(token).catch(() => [] as Invite[]),
+    ]);
+    this.ui.showMyTables(tables, invites);
+  }
+
+  private async boot(seat: Seat): Promise<void> {
+    if (!this.gameId || !this.token || this.busy) return;
+    this.busy = true;
+    try {
+      const state = await api.boot(this.gameId, this.token, seat);
+      await this.applyState(state, false);
+    } catch (e) {
+      this.ui.toast(errText(e));
+    } finally {
+      this.busy = false;
+    }
+  }
+
   private async refreshProfile(): Promise<void> {
     if (!this.profile) return;
     const before = new Set(this.profile.unlocked);
@@ -414,6 +558,9 @@ class Kingsreach {
     players: number;
     name?: string;
     password?: string;
+    teams?: boolean;
+    friendlyFire?: boolean;
+    inherit?: boolean;
   }): Promise<void> {
     if (this.busy) return;
     this.busy = true;
@@ -427,7 +574,7 @@ class Kingsreach {
     }
   }
 
-  private async createTable(opts: { name: string; players: number; password: string }): Promise<void> {
+  private async createTable(opts: TableOptions): Promise<void> {
     await this.createGame({ mode: "online", ...opts });
   }
 
@@ -551,7 +698,7 @@ class Kingsreach {
     } catch {
       this.forgetGame();
       this.ui.toast("That campaign is lost to history.");
-      this.ui.showMenu(false);
+      this.toMenu(false);
     } finally {
       this.busy = false;
     }
@@ -591,7 +738,7 @@ class Kingsreach {
     this.board.clear();
     this.forgetGame();
     void this.refreshProfile();
-    this.ui.showMenu(false);
+    this.toMenu(false);
   }
 
   private forgetGame(): void {
@@ -647,6 +794,7 @@ class Kingsreach {
   private async applyStateNow(state: GameState, animate: boolean): Promise<void> {
     if (this.state && state.version <= this.state.version) return;
     const hadPrevious = this.state !== null;
+    const movedBefore = this.state?.lastMove?.to ?? null;
     this.state = state;
     this.deselect();
     this.board.setSkins(state);
@@ -663,6 +811,7 @@ class Kingsreach {
     }
 
     if (hasPath(state.lastMove)) this.board.showTrail(state.lastMove.path);
+    this.soundTheMove(state, hadPrevious, movedBefore);
     this.playIncomingTaunt(state);
     if (this.watching) {
       this.ui.updateWhileWatching(state);
@@ -705,6 +854,26 @@ class Kingsreach {
     if (!fresh) return;
     const from = state.seats.find((s) => s.seat === fresh.seat);
     this.ui.showTaunt(fresh.seat, from?.name ?? "", fresh.text);
+  }
+
+  /**
+   * The knock a stone makes, and the flash when one is taken.
+   *
+   * Skipped on the first state of a game: opening a table you left half-played
+   * would otherwise announce a move that happened ten minutes ago. Skipped too
+   * when the move is the same one we already reacted to, which a re-poll of an
+   * unchanged position hands back.
+   */
+  private soundTheMove(state: GameState, hadPrevious: boolean, before: string | null): void {
+    const mv = state.lastMove;
+    if (!hadPrevious || !mv || !mv.to || mv.to === before) return;
+    const at = this.board.nodeWorld(mv.to);
+    if (mv.captured) {
+      const victim = state.pieces.find((p) => p.id === mv.captured);
+      this.effects.struck(at, seatInfo(victim?.owner ?? state.turn).hue);
+      return;
+    }
+    this.effects.landed(at);
   }
 
   /**

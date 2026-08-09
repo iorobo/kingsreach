@@ -18,19 +18,23 @@ var (
 // legalDests runs a depth-first search over all paths of exactly p.Value
 // steps: any direction, turns allowed, no field visited twice within the move
 // (including the start), intermediate fields must be empty, and only kings may
-// use gold connections or the Throne. The final field may hold a rival piece
-// (a strike) but never a friendly one — and during the opening round, when
-// captures are barred, it must be empty. Returns one sample path per
-// destination.
-func (b *Board) legalDests(occ map[NodeID]*Piece, p *Piece, allowCapture bool) map[NodeID][]NodeID {
+// use gold connections or the Throne. The final field may hold a piece the
+// mover is allowed to strike (see State.CanTake — never your own, and an
+// ally's only under friendly fire) and during the opening round, when captures
+// are barred, it must be empty. Returns one sample path per destination.
+//
+// It takes the state rather than just the occupancy map because "may I take
+// that?" stopped being answerable from the two pieces alone once sides existed.
+func (b *Board) legalDests(s *State, occ map[NodeID]*Piece, p *Piece, allowCapture bool) map[NodeID][]NodeID {
 	res := map[NodeID][]NodeID{}
 	isKing := p.Value == 1
+	takeable := func(q *Piece) bool { return allowCapture && s.CanTake(p.Owner, q.Owner) }
 
 	var dfs func(cur NodeID, depth int, path []NodeID, visited map[NodeID]bool)
 	dfs = func(cur NodeID, depth int, path []NodeID, visited map[NodeID]bool) {
 		if depth == p.Value {
 			q, taken := occ[cur]
-			if !taken || (allowCapture && q.Owner != p.Owner) {
+			if !taken || takeable(q) {
 				if _, seen := res[cur]; !seen {
 					res[cur] = append([]NodeID(nil), path...)
 				}
@@ -50,7 +54,7 @@ func (b *Board) legalDests(occ map[NodeID]*Piece, p *Piece, allowCapture bool) m
 			if q, taken := occ[e.to]; taken {
 				// Occupied fields block movement; only the final step may
 				// enter one, and only when a strike is on.
-				if depth+1 < p.Value || !allowCapture || q.Owner == p.Owner {
+				if depth+1 < p.Value || !takeable(q) {
 					continue
 				}
 			}
@@ -67,17 +71,24 @@ func (b *Board) legalDests(occ map[NodeID]*Piece, p *Piece, allowCapture bool) m
 
 // LegalMovesFrom returns the legal destinations (with sample paths) for the
 // piece standing on from, or an empty map when there is none. Pieces of a
-// knocked-out player are frozen: they stay as obstacles but never move.
+// knocked-out player are frozen — they stay as obstacles but never move —
+// unless the table passes a fallen player's stones to their surviving ally.
 func (b *Board) LegalMovesFrom(s *State, from NodeID) map[NodeID][]NodeID {
 	occ := s.Occupancy()
 	p := occ[from]
-	if p == nil || s.IsOut(p.Owner) {
+	if p == nil {
 		return map[NodeID][]NodeID{}
 	}
-	return b.legalDests(occ, p, s.CapturesAllowed())
+	if s.IsOut(p.Owner) {
+		if _, ok := s.heir(p.Owner); !ok {
+			return map[NodeID][]NodeID{}
+		}
+	}
+	return b.legalDests(s, occ, p, s.CapturesAllowed())
 }
 
-// HasAnyLegalMove reports whether seat c has at least one legal move.
+// HasAnyLegalMove reports whether seat c has at least one legal move, counting
+// any fallen ally's stones they have taken charge of.
 func (b *Board) HasAnyLegalMove(s *State, c Color) bool {
 	if s.IsOut(c) {
 		return false
@@ -85,10 +96,10 @@ func (b *Board) HasAnyLegalMove(s *State, c Color) bool {
 	occ := s.Occupancy()
 	allow := s.CapturesAllowed()
 	for _, p := range s.Pieces {
-		if p.Captured || p.Owner != c {
+		if p.Captured || !s.MayMove(c, p.Owner) {
 			continue
 		}
-		if len(b.legalDests(occ, p, allow)) > 0 {
+		if len(b.legalDests(s, occ, p, allow)) > 0 {
 			return true
 		}
 	}
@@ -115,17 +126,17 @@ func (b *Board) ApplyMove(s *State, mover Color, from, to NodeID) (*MoveRecord, 
 	}
 	occ := s.Occupancy()
 	p := occ[from]
-	if p == nil || p.Owner != mover {
+	if p == nil || !s.MayMove(mover, p.Owner) {
 		return nil, ErrNoPiece
 	}
 	allow := s.CapturesAllowed()
-	path, ok := b.legalDests(occ, p, allow)[to]
+	path, ok := b.legalDests(s, occ, p, allow)[to]
 	if !ok {
 		// Distinguish "that would be a strike, and strikes are not open yet"
 		// from an ordinary illegal move, so the client can say why.
 		if !allow {
-			if q := occ[to]; q != nil && q.Owner != mover {
-				if _, reachable := b.legalDests(occ, p, true)[to]; reachable {
+			if q := occ[to]; q != nil && s.CanTake(p.Owner, q.Owner) {
+				if _, reachable := b.legalDests(s, occ, p, true)[to]; reachable {
 					return nil, ErrNoCaptures
 				}
 			}
@@ -154,12 +165,7 @@ func (b *Board) ApplyMove(s *State, mover Color, from, to NodeID) (*MoveRecord, 
 	}
 	if fallenKing != "" {
 		s.knockOut(fallenKing, OutKingTaken)
-		if active := s.Active(); len(active) <= 1 {
-			if len(active) == 1 {
-				s.finish(active[0], ReasonLastAlive)
-			} else {
-				s.finishDraw(ReasonLastAlive)
-			}
+		if s.settleIfOneSideLeft() {
 			return rec, nil
 		}
 	}
@@ -185,12 +191,7 @@ func (s *State) advanceTurn(b *Board, from Color) {
 			return
 		}
 		s.knockOut(next, OutBlocked)
-		if active := s.Active(); len(active) <= 1 {
-			if len(active) == 1 {
-				s.finish(active[0], ReasonLastAlive)
-			} else {
-				s.finishDraw(ReasonLastAlive)
-			}
+		if s.settleIfOneSideLeft() {
 			return
 		}
 		current = next

@@ -176,6 +176,38 @@
   .watching #seat { color: var(--gold-pale); font-style: italic; }
 
   .muted { color: #a99e8c; font-size: 14px; }
+
+  /* Team options, the colour picker, friends and the "where was I" list. */
+  .check {
+    display: flex; align-items: center; gap: 9px; text-align: left;
+    color: var(--cream); font-size: 15px; padding: 7px 2px; cursor: pointer;
+  }
+  .check.sub { padding-left: 24px; color: #a99e8c; font-size: 14px; }
+  .check input { accent-color: var(--gold); width: 16px; height: 16px; }
+  #team-options { margin-bottom: 10px; }
+
+  #colour-picker { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 16px; }
+  /* Not .swatch: the collection rows already own that name. */
+  .colourpick {
+    width: 56px; padding: 6px 4px 5px; border-radius: 10px; border: 2px solid transparent;
+    background: #191614; color: #a99e8c; font-size: 11px; cursor: pointer; font-family: inherit;
+  }
+  .colourpick .blob { display: block; width: 26px; height: 26px; border-radius: 50%; margin: 0 auto 4px; }
+  .colourpick.on { border-color: var(--gold); color: var(--cream); }
+
+  .friendrow, .tablerow {
+    display: flex; align-items: center; gap: 10px; text-align: left;
+    background: #191614; border: 1px solid #3c3733; border-radius: 10px;
+    padding: 8px 11px; margin-bottom: 7px;
+  }
+  .friendrow img { width: 28px; height: 28px; border-radius: 6px; flex: none; }
+  .friendrow .who, .tablerow .who { flex: 1; min-width: 0; }
+  .friendrow .who b, .tablerow .who b { display: block; color: var(--cream); font-weight: normal; }
+  .friendrow .who span, .tablerow .who span { font-size: 12px; color: #8d8377; }
+  .tablerow.yours { border-color: #7a6320; }
+  .tablerow .nudge { color: var(--gold-pale); font-size: 12px; }
+  #menu-tables { margin: 4px 0 10px; }
+  #menu-tables .section, .invite .section { text-align: left; }
   #lobbyseats { margin: 4px 0 14px; }
   #lobbyseats .seatline {
     display: flex; align-items: center; gap: 9px; text-align: left; font-size: 14px;
@@ -212,6 +244,10 @@
   .player.gone .who { text-decoration: line-through; }
   .player.mine .who { color: var(--gold-pale); }
   .player .lost { font-size: 12px; color: #a99e8c; letter-spacing: 1px; }
+  .player .boot {
+    padding: 2px 8px; font-size: 12px; border-radius: 7px;
+    background: rgba(160,82,66,.22); border-color: #a05242; color: #ffb4a2;
+  }
 
   /* ---- Lobby browser ---- */
   .card.wide { width: min(880px, 97vw); }
@@ -408,6 +444,8 @@
       <button class="ghost wide" id="btn-rules">How to play</button>
       <button class="ghost wide" id="btn-leaderboard">Hall of champions</button>
       <button class="ghost wide" id="btn-collection">Collection — skins &amp; places</button>
+      <button class="ghost wide" id="btn-friends">Friends</button>
+      <div id="menu-tables"></div>
       <button class="ghost wide hidden" id="btn-resume">Resume last game</button>
       <button id="btn-switch">Not you? Sign in as someone else</button>
       <button id="btn-version" title="What changed">v—</button>
@@ -464,6 +502,12 @@
         <button data-players="3">3</button>
         <button data-players="4">4</button>
       </div>
+      <!-- Teams need four seats — two against two — so this only appears at 4. -->
+      <div id="team-options" class="hidden">
+        <label class="check"><input type="checkbox" id="opt-teams"> Team game — partners sit opposite</label>
+        <label class="check sub"><input type="checkbox" id="opt-friendly"> Friendly fire — you can strike your partner</label>
+        <label class="check sub"><input type="checkbox" id="opt-inherit"> If your partner falls, you move their stones</label>
+      </div>
       <div class="row" id="row-table-pass">
         <input id="table-pass" type="password" maxlength="40" placeholder="Password (leave empty for an open table)" autocomplete="new-password">
       </div>
@@ -490,6 +534,8 @@
       <h1 style="font-size:30px" id="lobbyname">Table</h1>
       <div class="tagline" id="lobbywait">Awaiting a challenger…</div>
       <div id="lobbyseats"></div>
+      <div class="hint hidden" id="lobby-mode"></div>
+      <div id="lobby-invite"></div>
       <button class="primary wide" id="btn-start">Start now — the computer takes the empty seats</button>
       <button class="ghost wide" id="btn-cancel">Cancel</button>
     </div>
@@ -550,10 +596,22 @@
     <div class="card">
       <h1 style="font-size:30px">Collection</h1>
       <div class="stats" id="collection-stats"></div>
+      <div class="section">YOUR COLOUR</div>
+      <div class="hint">Which stones you would rather play. The seat still decides where you sit; if two players want the same colour, whoever wins the opening throw gets it.</div>
+      <div id="colour-picker"></div>
       <div id="collection-list"></div>
       <div class="section">CREDITS</div>
       <div class="credit" id="credits"></div>
       <button class="primary wide" id="btn-close-collection" style="margin-top:16px">Close</button>
+    </div>
+  </div>
+
+  <div id="friends" class="overlay hidden">
+    <div class="card">
+      <h1 style="font-size:28px">Friends</h1>
+      <div class="hint" id="friends-note"></div>
+      <div id="friends-list"></div>
+      <button class="primary wide" id="btn-close-friends" style="margin-top:14px">Close</button>
     </div>
   </div>
 

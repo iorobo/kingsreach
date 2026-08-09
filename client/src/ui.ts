@@ -1,6 +1,6 @@
 import type {
-  BoardDto, CatalogItem, GameState, Lobby, Profile, RankEntry, RunningTable, Seat, Standings,
-  TauntOption,
+  BoardDto, CatalogItem, Friend, GameState, Invite, Lobby, MyTable, Profile, RankEntry,
+  RunningTable, Seat, Standings, TauntOption,
 } from "./api";
 import { RULES, drawDiagram } from "./rules";
 import { RELEASES, VERSION } from "./changelog";
@@ -8,7 +8,7 @@ import type { Credit } from "./credits";
 import { ASSET_CREDITS, creditLine } from "./credits";
 import { countryList, countryName, flagChip } from "./flags";
 import type { Track } from "./music";
-import { seatInfo, seatName } from "./seats";
+import { COLOUR_LIST, seatInfo, seatName } from "./seats";
 
 // Thin wrapper around the HTML overlay in index.html. The 3D scene owns the
 // canvas; everything with text lives in the DOM (crisp, accessible, cheap).
@@ -42,6 +42,9 @@ export interface TableOptions {
   name: string;
   players: number;
   password: string;
+  teams: boolean;
+  friendlyFire: boolean;
+  inherit: boolean;
 }
 
 export interface UiHandlers {
@@ -65,7 +68,14 @@ export interface UiHandlers {
   toggleMusic(): void;
   sendTaunt(id: string): void;
   equip(id: string, kind: CatalogItem["kind"]): void;
+  setColour(id: string): void;
   rematch(): void;
+  friends(): void;
+  invite(profileId: string): void;
+  acceptInvite(inv: Invite): void;
+  dismissInvite(id: string): void;
+  openTable(table: MyTable): void;
+  boot(seat: Seat): void;
 }
 
 /** Why a seat dropped out, for the seat list. */
@@ -106,8 +116,10 @@ export class Ui {
         for (const other of Array.from($("player-count").querySelectorAll("button"))) {
           other.classList.toggle("on", other === btn);
         }
+        this.syncTeamOptions();
       };
     }
+    $("opt-teams").onchange = () => this.syncTeamOptions();
     this.fillCountries();
 
     $("btn-steam").onclick = () => h.steamLogin();
@@ -157,6 +169,14 @@ export class Ui {
     $("btn-music").onclick = () => h.toggleMusic();
     $("btn-collection").onclick = () => this.showCollection();
     $("btn-close-collection").onclick = () => $("collection").classList.add("hidden");
+    $("btn-friends").onclick = () => this.h.friends();
+    // Closing must put you back where you opened it: reached from your own
+    // lobby, "Close" going to the main menu would walk you out of your table.
+    $("btn-close-friends").onclick = () => {
+      const back = this.lobbyState;
+      if (back) this.showLobby(back);
+      else this.showMenu(this.canResume);
+    };
 
     onEnter($<HTMLInputElement>("guest-name"), () => this.submitGuest());
     onEnter($<HTMLInputElement>("table-name"), () => this.submitTable());
@@ -244,11 +264,32 @@ export class Ui {
       this.h.offline(this.players);
       return;
     }
+    const teams = this.players === 4 && $<HTMLInputElement>("opt-teams").checked;
     this.h.createTable({
       name: $<HTMLInputElement>("table-name").value.trim(),
       players: this.players,
       password: $<HTMLInputElement>("table-pass").value,
+      teams,
+      friendlyFire: teams && $<HTMLInputElement>("opt-friendly").checked,
+      inherit: teams && $<HTMLInputElement>("opt-inherit").checked,
     });
+  }
+
+  /**
+   * Team options only make sense at four seats — two against two — so they
+   * appear with the fourth seat and the sub-options only once teams are on.
+   * Hiding them is better than greying them out: at two players "friendly
+   * fire" is not a disabled choice, it is a meaningless one.
+   */
+  private syncTeamOptions(): void {
+    const four = this.players === 4 && !this.offlineSetup;
+    $("team-options").classList.toggle("hidden", !four);
+    const on = four && $<HTMLInputElement>("opt-teams").checked;
+    for (const id of ["opt-friendly", "opt-inherit"]) {
+      const box = $<HTMLInputElement>(id);
+      box.disabled = !on;
+      box.parentElement?.classList.toggle("hidden", !on);
+    }
   }
 
   private submitPassword(): void {
@@ -461,7 +502,7 @@ export class Ui {
   private hideAll(): void {
     for (const id of [
       "signin", "menu", "browser", "create", "joinpass", "lobby", "result",
-      "collection", "leaderboard", "flagpicker", "changelog", "rules",
+      "collection", "leaderboard", "flagpicker", "changelog", "rules", "friends",
     ]) {
       $(id).classList.add("hidden");
     }
@@ -476,6 +517,8 @@ export class Ui {
 
   showMenu(canResume: boolean): void {
     this.canResume = canResume;
+    this.lobbyState = null; // no table to go back to from here
+    this.invitable = false;
     this.hideAll();
     $("menu").classList.remove("hidden");
     document.body.classList.add("hud-hidden");
@@ -535,6 +578,7 @@ export class Ui {
   private showCreate(): void {
     this.offlineSetup = false;
     this.hideAll();
+    this.syncTeamOptions();
     $("create").classList.remove("hidden");
     $("create-title").textContent = "Open a table";
     $("create-note").classList.add("hidden");
@@ -553,6 +597,7 @@ export class Ui {
   private showOfflineSetup(): void {
     this.showCreate();
     this.offlineSetup = true;
+    this.syncTeamOptions();
     $("create-title").textContent = "Offline game";
     const note = $("create-note");
     note.textContent =
@@ -717,6 +762,7 @@ export class Ui {
 
   showLobby(state: GameState): void {
     this.hideAll();
+    this.lobbyState = state;
     $("lobby").classList.remove("hidden");
     document.body.classList.add("hud-hidden");
 
@@ -740,8 +786,38 @@ export class Ui {
         ? `${seat.name || info.colourName}${seat.you ? " (you)" : ""}`
         : "open seat";
       line.appendChild(who);
+      if (seat.team) {
+        const team = document.createElement("span");
+        team.className = "muted";
+        team.textContent = seat.team === 1 ? "Side A" : "Side B";
+        line.appendChild(team);
+      }
       host.appendChild(line);
     }
+
+    const mode = $("lobby-mode");
+    mode.classList.toggle("hidden", !state.teams);
+    if (state.teams) {
+      const extras = [
+        state.friendlyFire ? "friendly fire on" : "no friendly fire",
+        state.inherit ? "a fallen partner's stones pass to you" : "fallen partners' stones stay put",
+      ];
+      mode.textContent = `Two against two — ${extras.join(", ")}.`;
+    }
+
+    // Inviting only makes sense from a table with a seat left to fill, which
+    // is exactly when the friend list is worth opening.
+    this.invitable = !!mySeat && free > 0;
+    const invite = $("lobby-invite");
+    invite.replaceChildren();
+    if (this.invitable) {
+      const btn = document.createElement("button");
+      btn.className = "ghost wide";
+      btn.textContent = "Invite a friend";
+      btn.onclick = () => this.h.friends();
+      invite.appendChild(btn);
+    }
+
     // Anyone seated may start a table that is not filling up — on a table the
     // house opened, the first seat belongs to the computer, so tying this to
     // the host would strand the one real player there for ever.
@@ -750,6 +826,8 @@ export class Ui {
 
   showGame(): void {
     this.hideAll();
+    this.lobbyState = null;
+    this.invitable = false;
     document.body.classList.remove("hud-hidden");
     document.body.classList.remove("watching");
     this.disarmResign();
@@ -988,6 +1066,22 @@ export class Ui {
       }
 
       row.append(who, tag);
+
+      // Somebody whose clock has run out can be shown the door. The server
+      // enforces the same rule the sweeper does, so this only ever does what
+      // was about to happen anyway — but staring at an expired clock with no
+      // button is indistinguishable from the server having forgotten you.
+      if (seat.overdue && !seat.you && !seat.out && state.you !== "all" && state.you !== "") {
+        const boot = document.createElement("button");
+        boot.className = "boot";
+        boot.textContent = "Boot";
+        boot.title = `${seat.name || info.label} is out of time`;
+        boot.onclick = () => {
+          boot.disabled = true;
+          this.h.boot(seat.seat);
+        };
+        row.append(boot);
+      }
       host.appendChild(row);
     }
   }
@@ -1025,6 +1119,155 @@ export class Ui {
     $("btn-resign").textContent = "Resign";
   }
 
+  // ---- friends, invitations, and the games you already have going ----
+
+  /**
+   * The friend list, or the reason there isn't one.
+   *
+   * `reason` matters more than it looks. There are three separate ways for
+   * this to be empty — you signed in as a guest, the server has no Steam API
+   * key, or your Steam friend list is private — and all three look identical
+   * as a blank panel. Each of them is somebody's to fix, so each says which.
+   */
+  showFriends(friends: Friend[], reason: string, total: number): void {
+    this.hideAll();
+    const list = $("friends-list");
+    list.replaceChildren();
+
+    const note = $("friends-note");
+    if (reason) {
+      note.textContent = reason;
+    } else if (!friends.length) {
+      note.textContent = total
+        ? `None of your ${total} Steam friends have played Kingsreach yet.`
+        : "Steam gave us no friends to look up.";
+    } else {
+      note.textContent = `${friends.length} of your ${total} Steam friends play Kingsreach.`;
+    }
+
+    for (const f of friends) {
+      const row = document.createElement("div");
+      row.className = "friendrow";
+      if (f.avatar) {
+        const img = document.createElement("img");
+        img.src = f.avatar;
+        img.alt = "";
+        row.appendChild(img);
+      }
+      const who = document.createElement("div");
+      who.className = "who";
+      const name = document.createElement("b");
+      name.textContent = f.name;
+      who.appendChild(name);
+      const sub = document.createElement("span");
+      sub.textContent = f.playing
+        ? `at “${f.playingName || "a table"}” now`
+        : `${f.wins} ${f.wins === 1 ? "victory" : "victories"}`;
+      who.appendChild(sub);
+      row.appendChild(who);
+      if (f.country) row.appendChild(flagChip(f.country));
+
+      // Inviting only means anything from a table with a free seat, which is
+      // why the button is here rather than on the friend row generally.
+      if (this.invitable) {
+        const ask = document.createElement("button");
+        ask.textContent = "Invite";
+        ask.onclick = () => {
+          ask.disabled = true;
+          ask.textContent = "Asked";
+          this.h.invite(f.profileId);
+        };
+        row.appendChild(ask);
+      }
+      list.appendChild(row);
+    }
+    $("friends").classList.remove("hidden");
+  }
+
+  /** True while the player is hosting a table with a seat left to fill. */
+  private invitable = false;
+  /** The lobby to return to when the friend list was opened from one. */
+  private lobbyState: GameState | null = null;
+
+  /** The tables you are already sitting at, and anyone asking you to theirs. */
+  showMyTables(tables: MyTable[], invites: Invite[]): void {
+    const host = $("menu-tables");
+    host.replaceChildren();
+    if (!tables.length && !invites.length) return;
+
+    const section = (label: string) => {
+      const head = document.createElement("div");
+      head.className = "section";
+      head.textContent = label;
+      host.appendChild(head);
+    };
+
+    if (invites.length) {
+      section("INVITATIONS");
+      for (const inv of invites) {
+        const row = document.createElement("div");
+        row.className = "tablerow";
+        const who = document.createElement("div");
+        who.className = "who";
+        const b = document.createElement("b");
+        b.textContent = inv.table || "a table";
+        who.appendChild(b);
+        const sub = document.createElement("span");
+        sub.textContent = `${inv.from} asked you — ${inv.seats} seat${inv.seats === 1 ? "" : "s"} free`;
+        who.appendChild(sub);
+        row.appendChild(who);
+
+        const join = document.createElement("button");
+        join.className = "primary";
+        join.textContent = "Join";
+        join.onclick = () => this.h.acceptInvite(inv);
+        row.appendChild(join);
+
+        const no = document.createElement("button");
+        no.textContent = "✕";
+        no.title = "No thanks";
+        no.onclick = () => this.h.dismissInvite(inv.id);
+        row.appendChild(no);
+        host.appendChild(row);
+      }
+    }
+
+    if (tables.length) {
+      section(tables.length === 1 ? "YOUR TABLE" : "YOUR TABLES");
+      for (const t of tables) {
+        const row = document.createElement("div");
+        row.className = "tablerow" + (t.yours ? " yours" : "");
+        const who = document.createElement("div");
+        who.className = "who";
+        const b = document.createElement("b");
+        b.textContent = t.name || "a table";
+        who.appendChild(b);
+        const sub = document.createElement("span");
+        // The seat, not seatName: colours belong to a table, and the palette
+        // loaded here is whichever game is on screen — naming a colour from it
+        // would tell you the wrong one for every other table on the list.
+        sub.textContent =
+          t.status === "waiting"
+            ? `waiting — ${t.free} seat${t.free === 1 ? "" : "s"} still free`
+            : `move ${t.ply} · ${seatInfo(t.seat).label}`;
+        who.appendChild(sub);
+        row.appendChild(who);
+        if (t.yours) {
+          const nudge = document.createElement("span");
+          nudge.className = "nudge";
+          nudge.textContent = "your move";
+          row.appendChild(nudge);
+        }
+        const open = document.createElement("button");
+        open.className = t.yours ? "primary" : "";
+        open.textContent = "Open";
+        open.onclick = () => this.h.openTable(t);
+        row.appendChild(open);
+        host.appendChild(row);
+      }
+    }
+  }
+
   // ---- collection ----
 
   private showCollection(): void {
@@ -1037,6 +1280,7 @@ export class Ui {
     list.replaceChildren();
     const p = this.profile;
     this.refreshStats();
+    this.renderColours();
 
     const section = (label: string, kind: CatalogItem["kind"]) => {
       const head = document.createElement("div");
@@ -1050,6 +1294,35 @@ export class Ui {
     section("PIECE SKINS", "skin");
     section("BOARDS", "board");
     section("ENVIRONMENTS", "env");
+  }
+
+  /**
+   * The colour picker. Nothing here is unlockable — a colour is a preference,
+   * and charging wins for one would make the dice tie-break meaningless — so
+   * these are plain swatches rather than catalog rows.
+   */
+  private renderColours(): void {
+    const picker = $("colour-picker");
+    picker.replaceChildren();
+    const chosen = this.profile?.colour ?? "";
+
+    const swatch = (id: string, name: string, css: string | null) => {
+      const btn = document.createElement("button");
+      btn.className = "colourpick" + (chosen === id ? " on" : "");
+      btn.type = "button";
+      const blob = document.createElement("span");
+      blob.className = "blob";
+      // "No preference" gets the six of them in a ring rather than a seventh
+      // colour, which would look like a choice of its own.
+      blob.style.background = css ?? `conic-gradient(${COLOUR_LIST.map((c) => c.css).join(",")})`;
+      btn.appendChild(blob);
+      btn.appendChild(document.createTextNode(name));
+      btn.onclick = () => this.h.setColour(id === "" ? "none" : id);
+      picker.appendChild(btn);
+    };
+
+    swatch("", "Any", null);
+    for (const c of COLOUR_LIST) swatch(c.id, c.name, c.css);
   }
 
   private itemRow(item: CatalogItem, profile: Profile | null): HTMLElement {

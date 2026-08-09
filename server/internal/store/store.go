@@ -30,6 +30,16 @@ type Seat struct {
 	// Resolving it per poll would mean a leaderboard query on every state
 	// build, and a rank that shifts mid-game changes nothing. 0 = unranked.
 	Rank int `json:"rank,omitempty"`
+	// Wants is the colour this player asked for; Colour is what they were
+	// given. Both are presentation only — the seat still decides where you sit
+	// and where the camera looks from. Empty Colour means "the seat's own",
+	// which is every game played before colours could be chosen.
+	Wants  string `json:"wants,omitempty"`
+	Colour string `json:"colour,omitempty"`
+	// Team is the side this seat plays for; 0 in a free-for-all. Mirrors
+	// game.State.Teams, which is where the rules read it from — this copy is
+	// for the lobby, which has seats but no state worth consulting.
+	Team int `json:"team,omitempty"`
 }
 
 // HasBot reports whether any seat is computer-played.
@@ -62,8 +72,27 @@ type GameRecord struct {
 	Listed       bool   // shows in the lobby browser
 	RematchID    string // the table this one's players moved on to, once agreed
 
+	// Team play, as chosen by the host. Kept on the record as well as in the
+	// state so the lobby browser can label a table before there is a game.
+	Teams        bool
+	FriendlyFire bool
+	Inherit      bool
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// Invite is one player asking another to a specific table. Rows are short
+// lived: a table is swept within the hour, and an invitation to a table that
+// no longer exists is noise.
+type Invite struct {
+	ID        string
+	GameID    string
+	FromID    string // profile that sent it
+	FromName  string
+	ToID      string // profile it is for
+	TableName string
+	CreatedAt time.Time
 }
 
 // Locked reports whether joining needs a password.
@@ -129,6 +158,34 @@ func (g *GameRecord) SkinOf(seat game.Color) string {
 	return ""
 }
 
+// SeatByColor finds a seat by its board position.
+func (g *GameRecord) SeatByColor(c game.Color) *Seat {
+	for i := range g.Seats {
+		if g.Seats[i].Seat == c {
+			return &g.Seats[i]
+		}
+	}
+	return nil
+}
+
+// TeamMap is the seats' sides, in the shape the engine wants. Nil when the
+// table is a free-for-all.
+func (g *GameRecord) TeamMap() map[game.Color]int {
+	if !g.Teams {
+		return nil
+	}
+	out := map[game.Color]int{}
+	for _, s := range g.Seats {
+		if s.Team != 0 {
+			out[s.Seat] = s.Team
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // Profile is a player identity, held by a secret token the client stores.
 // Kind is "steam" for a verified Steam sign-in — only those keep progress —
 // or "guest" for someone who just typed a name.
@@ -145,8 +202,11 @@ type Profile struct {
 	EquippedSkin  string
 	EquippedEnv   string
 	EquippedBoard string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// Colour is the seat colour this player would rather have. Empty means no
+	// preference, which is also what everyone had before the picker existed.
+	Colour    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Persistent reports whether this identity keeps its progress between visits.
@@ -162,6 +222,10 @@ type Store interface {
 	ListOpen(ctx context.Context, limit int) ([]*GameRecord, error)
 	// ListActive returns games in progress, so the computer can take its turns.
 	ListActive(ctx context.Context, limit int) ([]*GameRecord, error)
+	// ListForProfile returns the unfinished tables a profile holds a seat at,
+	// most recently touched first. This is what lets one account play several
+	// games at once and find its way back to each of them.
+	ListForProfile(ctx context.Context, profileID string, limit int) ([]*GameRecord, error)
 	// Sweep clears out the leftovers: waiting tables nobody joined, and games
 	// abandoned mid-play. Without the second cutoff every walked-away game
 	// stays "active" for ever and clogs the board room.
@@ -171,11 +235,21 @@ type Store interface {
 	GetProfileByToken(ctx context.Context, token string) (*Profile, error)
 	GetProfileBySteamID(ctx context.Context, steamID string) (*Profile, error)
 	UpdateProfileIdentity(ctx context.Context, p *Profile) error
-	UpdateProfileEquip(ctx context.Context, id, skin, env, board string) error
+	UpdateProfileEquip(ctx context.Context, id, skin, env, board, colour string) error
 	BumpProfileStats(ctx context.Context, id string, win bool) error
 	// Leaderboard returns signed-in players with at least minWins victories,
 	// best first. Guests are never listed — they keep no progress to rank.
 	Leaderboard(ctx context.Context, minWins, limit int) ([]*Profile, error)
+	// ProfilesBySteamIDs looks up the profiles behind a set of SteamIDs. This
+	// is the whole friend list: Steam says who your friends are, and this says
+	// which of them have ever played Kingsreach.
+	ProfilesBySteamIDs(ctx context.Context, steamIDs []string) ([]*Profile, error)
+
+	CreateInvite(ctx context.Context, inv *Invite) error
+	// InvitesFor returns the invitations waiting for a profile, newest first.
+	InvitesFor(ctx context.Context, profileID string) ([]*Invite, error)
+	// DeleteInvite removes one invitation, whether accepted or turned down.
+	DeleteInvite(ctx context.Context, id, profileID string) error
 
 	Name() string
 	Ping(ctx context.Context) error

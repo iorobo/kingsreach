@@ -11,9 +11,9 @@
 // that piece is gone — an animation that topples it would play to an empty
 // square in the common case.
 
-import { Color3, Color4, DynamicTexture, ParticleSystem, SceneLoader, TransformNode, Vector3 } from "./babylon";
+import { Color3, Color4, ParticleSystem, SceneLoader, TransformNode, Vector3 } from "./babylon";
 import type { Scene } from "./babylon";
-import { C, hexPrism, mat } from "./theme";
+import { C, hexPrism, mat, softDot } from "./theme";
 
 const CROWN_MODEL = "king-crown.glb";
 
@@ -249,7 +249,7 @@ export class Finale {
   private sparkle(at: Vector3, colour: Color3, count: number, way: "up" | "down"): ParticleSystem {
     const up = way === "up";
     const system = new ParticleSystem(up ? "triumph" : "defeat", count, this.scene);
-    system.particleTexture = this.spark();
+    system.particleTexture = softDot(this.scene);
     system.emitter = at;
     system.minEmitBox = new Vector3(-0.6, -0.2, -0.6);
     system.maxEmitBox = new Vector3(0.6, 0.6, 0.6);
@@ -273,30 +273,6 @@ export class Finale {
     system.updateSpeed = 0.016;
     system.start();
     return system;
-  }
-
-  /**
-   * A soft round dot for the particles, drawn rather than shipped.
-   *
-   * The obvious shortcut — the famous one-pixel base64 GIF — is the *clear*
-   * pixel every tracking image uses, so the first version of this rendered a
-   * few hundred perfectly invisible sparks. Drawing it also gets a gradient
-   * edge, which beats a hard square.
-   */
-  private spark(): DynamicTexture {
-    const size = 32;
-    const tex = new DynamicTexture("spark", { width: size, height: size }, this.scene, false);
-    const ctx = tex.getContext() as CanvasRenderingContext2D;
-    const half = size / 2;
-    const fade = ctx.createRadialGradient(half, half, 0, half, half, half);
-    fade.addColorStop(0, "rgba(255,255,255,1)");
-    fade.addColorStop(0.45, "rgba(255,255,255,0.8)");
-    fade.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = fade;
-    ctx.fillRect(0, 0, size, size);
-    tex.update();
-    tex.hasAlpha = true;
-    return tex;
   }
 
   /** Stops emitting, then disposes once the last particles have died, so the

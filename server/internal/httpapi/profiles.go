@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"kingsreach/internal/game"
 	"kingsreach/internal/store"
 )
 
@@ -81,12 +82,23 @@ func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": catalog})
 }
 
+// handleColours lists the six stone colours a player may ask for. Unlike the
+// catalog nothing here is unlockable — a colour is a preference, and charging
+// wins for one would make the tie-break at the table meaningless.
+func (s *Server) handleColours(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"colours": colours})
+}
+
 func (s *Server) handleProfileEquip(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Token string `json:"token"`
 		Skin  string `json:"skin"`
 		Env   string `json:"env"`
 		Board string `json:"board"`
+		// Colour is the stone colour this player would rather have. "none"
+		// clears the preference — an empty string means "leave it alone",
+		// which is what every other field here means too.
+		Colour string `json:"colour"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request body")
@@ -97,9 +109,18 @@ func (s *Server) handleProfileEquip(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "unknown profile")
 		return
 	}
-	skin, env, board := p.EquippedSkin, p.EquippedEnv, p.EquippedBoard
+	skin, env, board, colour := p.EquippedSkin, p.EquippedEnv, p.EquippedBoard, p.Colour
 	if board == "" {
 		board = DefaultBoard
+	}
+	if req.Colour == "none" {
+		colour = ""
+	} else if req.Colour != "" {
+		if validColour(req.Colour) == "" {
+			writeErr(w, http.StatusBadRequest, "no such colour")
+			return
+		}
+		colour = req.Colour
 	}
 	if req.Board != "" {
 		it := itemByID(req.Board)
@@ -137,11 +158,11 @@ func (s *Server) handleProfileEquip(w http.ResponseWriter, r *http.Request) {
 		}
 		env = it.ID
 	}
-	if err := s.st.UpdateProfileEquip(r.Context(), p.ID, skin, env, board); err != nil {
+	if err := s.st.UpdateProfileEquip(r.Context(), p.ID, skin, env, board, colour); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not save")
 		return
 	}
-	p.EquippedSkin, p.EquippedEnv, p.EquippedBoard = skin, env, board
+	p.EquippedSkin, p.EquippedEnv, p.EquippedBoard, p.Colour = skin, env, board, colour
 	writeJSON(w, http.StatusOK, toProfilePayload(p))
 }
 
@@ -164,7 +185,14 @@ func (s *Server) awardStats(ctx context.Context, rec *store.GameRecord) {
 	if rec.Mode != ModeOnline {
 		return
 	}
-	winnerProfile := ""
+	// In a team game the win belongs to the partnership, not to whoever
+	// happened to make the last move — so the winning *side* is what decides
+	// who gets the point.
+	won := map[game.Color]bool{}
+	for _, c := range rec.State.WinningSide() {
+		won[c] = true
+	}
+	winners := map[string]bool{}
 	seatsPer := map[string]int{}
 	bots := 0
 	for _, seat := range rec.Seats {
@@ -176,8 +204,8 @@ func (s *Server) awardStats(ctx context.Context, rec *store.GameRecord) {
 			continue
 		}
 		seatsPer[seat.Profile]++
-		if seat.Seat == rec.State.Winner {
-			winnerProfile = seat.Profile
+		if won[seat.Seat] {
+			winners[seat.Profile] = true
 		}
 	}
 	// Someone actually had to be on the other side of the board.
@@ -186,13 +214,15 @@ func (s *Server) awardStats(ctx context.Context, rec *store.GameRecord) {
 	// should never fire — but a win handed to someone playing themselves is
 	// exactly the result worth being paranoid about, and rows predating that
 	// check still exist.
-	if seatsPer[winnerProfile] > 1 {
-		logf("game %s: profile %s held %d seats; no win awarded",
-			rec.ID, winnerProfile, seatsPer[winnerProfile])
-		contested = false
+	for pid := range winners {
+		if seatsPer[pid] > 1 {
+			logf("game %s: profile %s held %d seats; no win awarded",
+				rec.ID, pid, seatsPer[pid])
+			contested = false
+		}
 	}
 	for pid := range seatsPer {
-		win := contested && pid == winnerProfile
+		win := contested && winners[pid]
 		if err := s.st.BumpProfileStats(ctx, pid, win); err != nil {
 			logf("game %s: stats update for profile %s failed: %v", rec.ID, pid, err)
 		}

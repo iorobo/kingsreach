@@ -129,10 +129,10 @@ func (b *Board) kingInDanger(s *State, seat Color) bool {
 		return false
 	}
 	for _, p := range s.Pieces {
-		if p.Captured || p.Owner == seat || s.IsOut(p.Owner) {
+		if p.Captured || s.IsOut(p.Owner) || !s.CanTake(p.Owner, seat) {
 			continue
 		}
-		if _, ok := b.legalDests(occ, p, allow)[king.Node]; ok {
+		if _, ok := b.legalDests(s, occ, p, allow)[king.Node]; ok {
 			return true
 		}
 	}
@@ -151,12 +151,15 @@ func (b *Board) tradeAt(s *State, seat Color, node NodeID) (attackers, defenders
 		if p.Captured || s.IsOut(p.Owner) || p.Node == node {
 			continue
 		}
-		if _, ok := b.legalDests(occ, p, allow)[node]; !ok {
+		if _, ok := b.legalDests(s, occ, p, allow)[node]; !ok {
 			continue
 		}
-		if p.Owner == seat {
+		// An ally recapturing is as good as doing it yourself; an ally who
+		// cannot legally strike us is no threat.
+		switch {
+		case p.Owner == seat || s.Allied(p.Owner, seat):
 			defenders++
-		} else {
+		case s.CanTake(p.Owner, seat):
 			attackers++
 		}
 	}
@@ -167,9 +170,14 @@ func (b *Board) tradeAt(s *State, seat Color, node NodeID) (attackers, defenders
 // for seat. This is what the search maximises, so every idea the bot has about
 // the game lives here.
 func (b *Board) evaluate(s *State, seat Color) float64 {
+	// "Ours" rather than "mine": in a team game an ally's stones, an ally's
+	// king near the Throne and an ally's victory all count as our own. Without
+	// this the bot plays its partner as an enemy.
+	ours := func(c Color) bool { return c == seat || s.Allied(c, seat) }
+
 	if s.Status == StatusFinished {
 		switch {
-		case s.Winner == seat:
+		case s.Winner == seat || (s.Winner != "" && s.Allied(s.Winner, seat)):
 			return winScore
 		case s.Winner == "":
 			return 0 // a draw is worth neither win nor loss
@@ -193,7 +201,7 @@ func (b *Board) evaluate(s *State, seat Color) float64 {
 		} else {
 			worth += float64(12-b.distanceToThrone(p.Node)) * 1.5
 		}
-		if p.Owner == seat {
+		if ours(p.Owner) {
 			score += worth
 		} else {
 			score -= worth
@@ -207,7 +215,7 @@ func (b *Board) evaluate(s *State, seat Color) float64 {
 			continue
 		}
 		if _, ok := b.LegalMovesFrom(s, king.Node)[ThroneID]; ok {
-			if rival == seat {
+			if ours(rival) {
 				score += 4e5
 			} else {
 				score -= 9e5
@@ -266,8 +274,8 @@ func firstQuietMove(s *State, moves []scoredMove) *scoredMove {
 // iteration order, so the same position from the same seed picked a different
 // move on every run. Sorting first costs a few string compares per turn and
 // makes a reported game replayable.
-func (b *Board) sortedDests(occ map[NodeID]*Piece, p *Piece, allow bool) []NodeID {
-	dests := b.legalDests(occ, p, allow)
+func (b *Board) sortedDests(s *State, occ map[NodeID]*Piece, p *Piece, allow bool) []NodeID {
+	dests := b.legalDests(s, occ, p, allow)
 	out := make([]NodeID, 0, len(dests))
 	for to := range dests {
 		out = append(out, to)
@@ -288,10 +296,10 @@ func (b *Board) rankMoves(s *State, seat Color, difficulty string, rng *rand.Ran
 
 	out := []scoredMove{}
 	for _, p := range s.Pieces {
-		if p.Captured || p.Owner != seat {
+		if p.Captured || !s.MayMove(seat, p.Owner) {
 			continue
 		}
-		for _, to := range b.sortedDests(occ, p, allow) {
+		for _, to := range b.sortedDests(s, occ, p, allow) {
 			trial := s.Clone()
 			if _, err := b.ApplyMove(trial, seat, p.Node, to); err != nil {
 				continue // never offer a move we cannot actually make
@@ -321,7 +329,7 @@ func (b *Board) rankMoves(s *State, seat Color, difficulty string, rng *rand.Ran
 // army away a piece at a time.
 func (b *Board) hangs(after *State, seat Color, at NodeID) float64 {
 	piece := after.Occupancy()[at]
-	if piece == nil || piece.Owner != seat {
+	if piece == nil || (piece.Owner != seat && !after.Allied(piece.Owner, seat)) {
 		return 0
 	}
 	attackers, defenders := b.tradeAt(after, seat, at)
@@ -354,12 +362,14 @@ type candidate struct {
 func (b *Board) orderedMoves(s *State, seat Color, occ map[NodeID]*Piece, allow bool) []candidate {
 	out := make([]candidate, 0, 32)
 	for _, p := range s.Pieces {
-		if p.Captured || p.Owner != seat {
+		if p.Captured || !s.MayMove(seat, p.Owner) {
 			continue
 		}
-		for to := range b.legalDests(occ, p, allow) {
+		for to := range b.legalDests(s, occ, p, allow) {
 			grab := 0.0
-			if victim := occ[to]; victim != nil && victim.Owner != seat {
+			// Taking an ally is legal under friendly fire but never a gain, so
+			// it is not worth searching first.
+			if victim := occ[to]; victim != nil && victim.Owner != seat && !s.Allied(victim.Owner, seat) {
 				grab = pieceWorth(victim.Value)
 			}
 			out = append(out, candidate{piece: p, to: to, grab: grab})
@@ -395,7 +405,9 @@ func (b *Board) search(s *State, seat Color, depth, ply int, alpha, beta float64
 	if s.IsOut(mover) || s.Phase != PhasePlay {
 		return decay(b.evaluate(s, seat), ply)
 	}
-	maximising := mover == seat
+	// An ally is on our side of the minimax, not the opposition's: their turn
+	// maximises too, and "paranoid" applies only to the actual enemy.
+	maximising := mover == seat || s.Allied(mover, seat)
 
 	occ := s.Occupancy()
 	allow := s.CapturesAllowed()

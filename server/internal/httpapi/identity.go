@@ -83,6 +83,7 @@ type profilePayload struct {
 	EquippedSkin  string   `json:"equippedSkin"`
 	EquippedEnv   string   `json:"equippedEnv"`
 	EquippedBoard string   `json:"equippedBoard"`
+	Colour        string   `json:"colour"` // preferred stone colour, "" = no preference
 	Unlocked      []string `json:"unlocked"`
 	DevUnlockAll  bool     `json:"devUnlockAll"`
 }
@@ -96,6 +97,7 @@ func toProfilePayload(p *store.Profile) *profilePayload {
 		Token: p.Token, Kind: p.Kind, Name: p.Name, Avatar: p.Avatar, Country: p.Country,
 		Persistent: p.Persistent(), GamesPlayed: p.GamesPlayed, Wins: p.Wins,
 		EquippedSkin: p.EquippedSkin, EquippedEnv: p.EquippedEnv, EquippedBoard: board,
+		Colour:   p.Colour,
 		Unlocked: unlockedIDs(p), DevUnlockAll: UnlockAll,
 	}
 }

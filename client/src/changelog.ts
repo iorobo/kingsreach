@@ -17,6 +17,20 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: "0.9",
+    date: "2026-08-09",
+    headline: "Play your own colour, pick a side, and bring a friend.",
+    changes: [
+      "Choose the colour you want to play. The seat still decides where you sit; if two people want the same colour, whoever wins the opening throw gets it.",
+      "Team games at four seats: partners sit opposite, so the turn order alternates between the sides. Optional friendly fire, and an option that hands a fallen partner's stones to you.",
+      "Friends, taken from Steam — the ones who have played Kingsreach, so the list is people you can actually invite. Steam sign-in only, and your Steam friend list has to be public.",
+      "Invite a friend to a table you are hosting; the invitation waits for them in the menu.",
+      "Several games at once. The menu lists every table you are sitting at, says which are waiting on you, and takes you back into any of them.",
+      "Stones now make a sound when they land and a sharper one when they take something, with a ring on the cloth to match. They follow the ♪ mute.",
+      "A player who has run out of time can be shown the door, instead of you having to guess whether the server noticed.",
+    ],
+  },
+  {
     version: "0.8",
     date: "2026-08-08",
     headline: "An ending worth reaching, and an opponent that sees it coming.",

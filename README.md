@@ -54,9 +54,67 @@ and who has been knocked out.
 
 Nobody may be struck during the opening round — everyone gets one safe move first.
 
+A stone makes a soft knock as it lands and a sharper crack when it takes something, each with a
+ring on the cloth. Both follow the ♪ mute — nobody means "silence the music but keep the clicks".
+
 **You have 150 seconds** to roll or move. The countdown sits in the top bar on your turn and turns
 red near the end; run it out and you forfeit your seat, and the game goes to whoever is left — the
 computer included. Offline games have no clock. Change it with `KINGSREACH_MOVE_SECONDS`.
+
+Once somebody's time is actually up, the seat list offers a **Boot** button to whoever is still
+playing. It does nothing the clock sweeper would not have done a second later, and refuses while
+their clock is still running — but staring at an expired countdown with no button is
+indistinguishable from the server having forgotten about you.
+
+## Colours, and sides
+
+**Pick the colour you want to play** in the Collection screen. It used to be the seat's: west was
+Obsidian and that was that, which made "I want to play green" really mean "I want the south-west
+chair". The seat still decides where you sit and where the camera looks from; the colour is yours.
+
+If two players want the same one, **whoever wins the opening throw gets it** and the other falls
+back to their seat's own colour. Using the dice for this was not a shortcut — it is the answer the
+game already gives to every other contested question, and it means the tie-break happens at the
+table where everyone can watch it. Colours are handed out once, when the throws settle, and never
+change again mid-game.
+
+**Team games** need four seats. Partners sit opposite each other, which also makes the turn order
+alternate between the sides — you never get two of one team in a row. Two options ride along:
+
+| Option | Off (default) | On |
+|---|---|---|
+| Friendly fire | you cannot strike your partner | you can |
+| Fallen partner's stones | stay on the board as obstacles | you move them on your own turn |
+
+A team game ends when one **side** is left standing rather than one player, so it can finish with
+two players still on the board.
+
+## Friends and invitations
+
+The friend list comes from **Steam**, and shows the friends who have signed in to Kingsreach at
+least once. There is deliberately no friend list of our own: building one means a request flow, an
+accept flow, a block flow and a report flow, all to arrive at a worse copy of the list the player
+already has. Filtering to people who have played here is the part that makes it useful — you
+cannot invite somebody who has no seat to sit in.
+
+Two things it needs, and it says so on screen when either is missing:
+
+- **`KINGSREACH_STEAM_KEY`**, a Steam Web API key ([get one here](https://steamcommunity.com/dev/apikey)).
+  `GetFriendList` will not answer without one, unlike the public profile XML the sign-in reads for
+  names and avatars.
+- **A public Steam friend list.** Steam answers 401 for private ones, which is the player's setting
+  to change rather than a bug to work around.
+
+From a table with a free seat, **Invite a friend** puts an invitation in their menu. It is a
+database row and nothing more — the client is already polling, so it asks for its invitations the
+same way it asks for everything else, and an invitation to a table that has since filled up or
+been swept simply stops existing.
+
+## Several games at once
+
+The menu lists **every table you hold a seat at**, marks the ones waiting on you, and takes you
+back into any of them. The seat token comes with each row, so a closed tab is not a lost game: a
+seat is remembered against your account, and walking back in hands you the same one.
 
 The computer plays at **easy, medium or hard**, picked at random when it sits down, and pauses
 before moving so it reads as an opponent rather than a script. Easy scores the position after its
@@ -161,6 +219,7 @@ The image builds the client and the server itself, so nothing generated needs to
    | `KINGSREACH_THINK_HARD` | `1400-3500` | …a hard one. `0-0` makes bots answer instantly. |
    | `KINGSREACH_UNLOCK_ALL` | off | Every skin, board and place unlocked, for a preview deployment. |
    | `KINGSREACH_BOT_LOBBIES` | on | Set `0` to stop the server keeping its own tables open. |
+   | `KINGSREACH_STEAM_KEY` | unset | Steam Web API key. Without it the friend list is unavailable and says so. |
    | `GEOIP_URL` | unset | Country lookup for IPv6 addresses; see below. |
 
    A malformed timing warns in the log and falls back to its default rather than

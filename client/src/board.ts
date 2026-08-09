@@ -2,7 +2,7 @@ import { MeshBuilder, TransformNode, Vector3 } from "./babylon";
 import type { GlowLayer, Mesh, Scene } from "./babylon";
 import { C, DEFAULT_BOARD, boardColours, disc, hexPrism, mat, ring } from "./theme";
 import { PIECE_H, buildPiece } from "./skins";
-import { seatInfo } from "./seats";
+import { clearTablePalette, seatInfo, setTablePalette } from "./seats";
 import type { BoardDto, GameState, MoveOption, PieceDto, Seat } from "./api";
 import { hasPath } from "./api";
 
@@ -136,6 +136,7 @@ export class BoardView {
   private readonly graves = new Map<string, TransformNode>();
   private skins = new Map<Seat, string>();
   private ranks = new Map<Seat, number>();
+  private colours = new Map<Seat, string>();
   private boardId = DEFAULT_BOARD;
   private pulse = 0;
 
@@ -265,9 +266,10 @@ export class BoardView {
   }
 
   /**
-   * Applies each seat's skin and leaderboard rank, rebuilding pieces when
-   * either changes. Rank is here rather than on the piece because it decides
-   * what the king's crown looks like, which is built once with the mesh.
+   * Applies each seat's skin, colour and leaderboard rank, rebuilding pieces
+   * when any of them changes. Rank is here rather than on the piece because it
+   * decides what the king's crown looks like, which is built once with the
+   * mesh — and so, now, is the colour.
    */
   setSkins(state: GameState): void {
     let changed = false;
@@ -282,7 +284,16 @@ export class BoardView {
         this.ranks.set(seat.seat, rank);
         changed = true;
       }
+      // The colours land when the opening dice settle, part-way through a
+      // game the player is already looking at, so the stones have to be
+      // rebuilt rather than assumed constant.
+      const colour = seat.colour ?? "";
+      if ((this.colours.get(seat.seat) ?? "") !== colour) {
+        this.colours.set(seat.seat, colour);
+        changed = true;
+      }
     }
+    setTablePalette(state.seats);
     if (!changed) return;
     for (const p of this.pieces.values()) p.dispose(); // rebuilt on next sync
     this.pieces.clear();
@@ -442,6 +453,8 @@ export class BoardView {
     this.clearGraves();
     this.skins.clear();
     this.ranks.clear();
+    this.colours.clear();
+    clearTablePalette();
     this.clearHints();
     this.clearTrail();
     this.select(null);

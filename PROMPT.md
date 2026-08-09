@@ -112,9 +112,33 @@ multiplayer game work.
 The game ends when:
 
 1. **Win** — a King reaches the Throne (`throne`). Immediate, whatever else is happening.
-2. **Win** — only one player is still in (`last-standing`). In a two-player game that is the
-   old "king captured / opponent blocked" ending.
+2. **Win** — only one *side* is still in (`last-standing`). In a free-for-all a side is one
+   player, which is the old "king captured / opponent blocked" ending; in a team game it is a
+   partnership, so a 2v2 finishes with two players still on the board.
 3. *(server safeguard, house rule)* after 800 plies it is a draw (`move-limit`).
+
+`settleIfOneSideLeft` is the single answer to "did that knockout finish it?". Before teams there
+were four copies of `len(active) <= 1` scattered through `moves.go` and `state.go`; a team game
+has to end while two players are still standing, so they could not simply stay. Miss one and the
+symptom is a very quiet bug — nobody can win, and the move limit calls it a draw two hundred
+plies later.
+
+### Teams
+
+Optional, four seats only (`game.PairedTeams`). Partners sit **opposite**, which is not a
+cosmetic choice: `SeatOrder(4)` runs clockwise, so pairing opposites is also what makes the turn
+order alternate between the sides. Two of one team in a row would not feel like a partnership.
+
+- `State.Teams` maps a seat to a side; absent or `0` is a free-for-all, so the zero value is the
+  old behaviour and every saved game keeps working untouched.
+- `State.CanTake(mover, owner)` replaces the bare `q.Owner != p.Owner` in `legalDests`: never your
+  own stone, an ally's only under `FriendlyFire`. This is why `legalDests` now takes the state —
+  "may I take that?" stopped being answerable from the two pieces alone.
+- `State.MayMove(mover, owner)` is the other half: your own stones always, and a fallen ally's
+  when `Inherit` is set. Inheriting is not annexing — the stones keep their owner, the fallen seat
+  never gets a turn back, and an enemy can never pick them up.
+- `WinningSide()` is what `awardStats` credits, so a partner who was knocked out early still gets
+  the win.
 
 **Who begins** is decided by dice, and **the players throw them**. A game opens in its `roll`
 phase: every seat owes one throw and no piece may move (`ErrStillRolling`). Clicking the die —
@@ -465,6 +489,68 @@ to everything, so beating it says nothing about depth.
 Bots pause before moving (`clocks.go`), longer when a capture is on the table. The ranges are env
 vars — see the README table — so a deployment can tune the feel without a rebuild, and tests set
 `0-0` rather than waiting on theatre.
+
+### 3.7a Colour, decoupled from the seat
+
+A seat used to *be* a colour. Fine until two people both want to play green, and one of them is
+told they are playing green next time.
+
+The preference lives on the profile (`profiles.colour`); the seat carries `Wants` (what they asked
+for) and `Colour` (what they got). Nothing is decided at join time, because the tie-break is the
+opening dice: `resolveColours` runs after every roll, does nothing until the phase reaches `play`,
+and does nothing again afterwards. Picking order is the throw winner first, then by what everyone
+rolled, ties by board order. Each player takes their preference if it is free, else their seat's
+own colour, else the first free one.
+
+Three things worth keeping:
+
+- **Empty `Colour` renders as the seat's own** (`colourOf`), so games saved before any of this
+  existed still draw, and so does a table still in its roll phase.
+- **Once settled, never re-run.** Changing your preference mid-game must not repaint the stones
+  under the players.
+- **Offline tables keep the seat colours.** One person plays every seat, so a single preference
+  cannot speak for all of them.
+
+On the client the palette is module state in `seats.ts` (`setTablePalette`), set from every state
+update. Exactly one game is on screen at a time, and the alternative is threading a palette
+through the board, the skins, the HUD and every toast that names a player. The one place it bites:
+the menu's "your tables" list covers *other* tables, so it names the seat and not the colour.
+
+### 3.7b Friends, invitations, and several games at once
+
+**Friends are Steam's.** There is no friend list of our own, deliberately: building one means a
+request flow, an accept flow, a block flow and a report flow, all to arrive at a worse copy of the
+list the player already has. `/api/friends` asks Steam who your friends are and intersects that
+with `ProfilesBySteamIDs` — the ones who have played here, because you cannot invite somebody with
+no seat to sit in. Needs `KINGSREACH_STEAM_KEY`; the public profile XML the sign-in uses does not
+cover `GetFriendList`.
+
+The SteamIDs are cached for five minutes, the *profiles* are not: which of your friends play
+Kingsreach changes the moment one of them signs in, and that is the half worth being fresh. Errors
+are cached too, so a private friend list is not retried on every poll.
+
+Three separate ways for the list to be empty — guest account, no API key, private friend list —
+and all three look identical as a blank panel, so each returns its own `reason`.
+
+**Invitations** are one row (`invites`), unique per game-and-player, read back with a join against
+`games` so an invitation to a table that filled up or was swept stops existing rather than needing
+a sweeper of its own. Only somebody seated at the table may send one; otherwise the endpoint is a
+way to put a message in front of any player.
+
+**Several games at once** is `ListForProfile`, indexed with GIN over the `seats` array so it is
+not a scan. Each row carries its **seat token**, which is what makes it work: a seat is remembered
+against the profile, so walking back in needs no join at all.
+
+### 3.7c The boot button
+
+The clock sweeper already knocks out anyone who runs out of time. The button (`POST
+.../boot`) does nothing it would not have done a second later — it enforces the same rule, refuses
+while the target's clock is still running, and refuses on your own seat. It exists because
+staring at an expired countdown with no button is indistinguishable from the server having
+forgotten about you, and because it is the honest fallback if the ticker is ever wedged.
+
+`clientSeat.Overdue` is derived per response from `s.now()` rather than stored: it is a fact about
+the current moment, not about the game.
 
 ### 3.8 Watching
 

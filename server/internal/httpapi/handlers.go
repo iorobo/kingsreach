@@ -74,6 +74,10 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		Profile  string `json:"profile"`
 		Name     string `json:"name"`     // table name for the lobby browser
 		Password string `json:"password"` // empty = open to anyone
+		// Team play. Only meaningful at four seats; see game.PairedTeams.
+		Teams        bool `json:"teams"`
+		FriendlyFire bool `json:"friendlyFire"`
+		Inherit      bool `json:"inherit"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req) // body is optional; defaults below
 	mode := normaliseMode(req.Mode)
@@ -89,14 +93,19 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "a table seats two to four players")
 		return
 	}
+	if req.Teams && players != 4 {
+		writeErr(w, http.StatusBadRequest, "teams need four seats — two against two")
+		return
+	}
 
 	token := randHex(16)
-	skin, profileID := DefaultSkin, ""
+	skin, profileID, wants := DefaultSkin, "", ""
 	hostName, hostCountry, avatar := "Wanderer", "", ""
 	if req.Profile != "" {
 		if p, err := s.st.GetProfileByToken(r.Context(), req.Profile); err == nil {
 			skin, profileID = p.EquippedSkin, p.ID
 			hostCountry, avatar = p.Country, p.Avatar
+			wants = validColour(p.Colour)
 			if p.Name != "" {
 				hostName = p.Name
 			}
@@ -124,18 +133,33 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		HostName:     hostName,
 		HostCountry:  hostCountry,
 		Listed:       mode == ModeOnline,
+		Teams:        req.Teams,
+		FriendlyFire: req.Teams && req.FriendlyFire,
+		Inherit:      req.Teams && req.Inherit,
 	}
+	sides := game.PairedTeams(seatOrder)
 	for i, seat := range seatOrder {
 		// The creator always takes the first seat; offline, one player runs
 		// the whole table so a group can share the screen.
 		mine := i == 0 || mode == ModeOffline
 		st := store.Seat{Seat: seat, Skin: skin, Taken: mine}
+		if rec.Teams {
+			st.Team = sides[seat]
+		}
 		if mine {
 			st.Token, st.Profile = token, profileID
 			st.Name, st.Avatar, st.Country = hostName, avatar, hostCountry
 			st.Rank = s.rankOf(r.Context(), profileID)
+			// Offline the host plays every seat, so a preference for one
+			// colour says nothing about the others: leave them their own.
+			if mode == ModeOnline {
+				st.Wants = wants
+			}
 		}
 		rec.Seats = append(rec.Seats, st)
+	}
+	if rec.Teams {
+		rec.State.SetTeams(rec.TeamMap(), rec.FriendlyFire, rec.Inherit)
 	}
 	if rec.FreeSeats() == 0 {
 		startGame(rec)
@@ -179,12 +203,13 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := randHex(16)
-	skin, profileID := DefaultSkin, ""
+	skin, profileID, wants := DefaultSkin, "", ""
 	name, country, avatar := "Wanderer", "", ""
 	if req.Profile != "" {
 		if p, perr := s.st.GetProfileByToken(r.Context(), req.Profile); perr == nil {
 			skin, profileID = p.EquippedSkin, p.ID
 			country, avatar = p.Country, p.Avatar
+			wants = validColour(p.Colour)
 			if p.Name != "" {
 				name = p.Name
 			}
@@ -222,6 +247,7 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 			rec.Seats[i].Token = token
 			rec.Seats[i].Profile = profileID
 			rec.Seats[i].Skin = skin
+			rec.Seats[i].Wants = wants
 			rec.Seats[i].Name, rec.Seats[i].Avatar, rec.Seats[i].Country = name, avatar, country
 			rec.Seats[i].Rank = s.rankOf(r.Context(), profileID)
 			break
@@ -231,6 +257,9 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		startGame(rec)
 		s.armClock(rec)
 	}
+	// Taking a seat can also finish the opening throws, when the last seat was
+	// held by somebody who had already rolled.
+	resolveColours(rec)
 	rec.Version++
 	if err := s.st.Update(r.Context(), rec); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not join game")
@@ -426,6 +455,9 @@ func (s *Server) handleRoll(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
+	// The last throw settles who opens, and with it who picks their colour
+	// first — so this is exactly the moment the colours can be handed out.
+	resolveColours(rec)
 	s.armClock(rec)
 	rec.Version++
 	if err := s.st.Update(r.Context(), rec); err != nil {

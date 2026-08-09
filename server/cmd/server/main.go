@@ -68,6 +68,14 @@ func main() {
 	} else {
 		log.Println("PUBLIC_URL not set -> Steam sign-in disabled; players can still play as guests")
 	}
+	// Friend lists come from Steam's Web API, which — unlike the public
+	// profile XML the sign-in reads — will not answer without a key.
+	if key := os.Getenv("KINGSREACH_STEAM_KEY"); key != "" {
+		httpapi.SteamKey = key
+		log.Println("Steam friend lists enabled")
+	} else {
+		log.Println("KINGSREACH_STEAM_KEY not set -> friend lists unavailable (get a key at https://steamcommunity.com/dev/apikey)")
+	}
 	if os.Getenv("KINGSREACH_BOT_LOBBIES") == "0" {
 		api.BotLobbies = false
 		log.Println("computer-hosted tables disabled")

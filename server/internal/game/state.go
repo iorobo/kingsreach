@@ -83,6 +83,98 @@ type State struct {
 	// an action may take and enforces expiry, because only the caller knows
 	// which seats are people and which are the computer.
 	TurnDeadline time.Time `json:"turnDeadline,omitempty"`
+
+	// Teams maps a seat to its side. Absent or 0 means a free-for-all, which
+	// is every game that predates team play — so the zero value is the old
+	// behaviour and saved games keep working untouched.
+	Teams map[Color]int `json:"teams,omitempty"`
+	// FriendlyFire lets allies strike each other. Off by default: "team game"
+	// without it is the usual reading.
+	FriendlyFire bool `json:"friendlyFire,omitempty"`
+	// Inherit lets a surviving player move a fallen ally's stones on their own
+	// turn, instead of leaving them on the board as scenery.
+	Inherit bool `json:"inherit,omitempty"`
+}
+
+// Allied reports whether two *different* seats are on the same side. A seat is
+// never its own ally here — callers that mean "mine or my team's" say so.
+func (s *State) Allied(a, b Color) bool {
+	if a == b || len(s.Teams) == 0 {
+		return false
+	}
+	return s.Teams[a] != 0 && s.Teams[a] == s.Teams[b]
+}
+
+// CanTake reports whether a piece owned by `owner` may be struck by one
+// belonging to `mover`. Your own stones are never fair game; an ally's are
+// only when friendly fire is switched on.
+func (s *State) CanTake(mover, owner Color) bool {
+	if mover == owner {
+		return false
+	}
+	if s.Allied(mover, owner) {
+		return s.FriendlyFire
+	}
+	return true
+}
+
+// MayMove reports whether `mover` is allowed to pick up a piece owned by
+// `owner` — their own always, and a fallen ally's when the table was set up to
+// pass their stones on.
+func (s *State) MayMove(mover, owner Color) bool {
+	if mover == owner {
+		return !s.IsOut(mover)
+	}
+	return s.Inherit && s.IsOut(owner) && s.Allied(mover, owner)
+}
+
+// heir finds the living ally who now moves a fallen player's stones, if any.
+func (s *State) heir(owner Color) (Color, bool) {
+	if !s.Inherit || !s.IsOut(owner) {
+		return "", false
+	}
+	for _, seat := range s.Seats {
+		if !s.IsOut(seat) && s.Allied(seat, owner) {
+			return seat, true
+		}
+	}
+	return "", false
+}
+
+// Teamed reports whether sides have been drawn up at all.
+func (s *State) Teamed() bool { return len(s.Teams) > 0 }
+
+// sidesLeft counts the distinct sides still in the game. A player with no team
+// counts as their own side, so this answers the free-for-all case too.
+func (s *State) sidesLeft() int {
+	seen := map[int]bool{}
+	solo := 0
+	for _, seat := range s.Active() {
+		if t := s.Teams[seat]; t != 0 {
+			seen[t] = true
+			continue
+		}
+		solo++
+	}
+	return len(seen) + solo
+}
+
+// settleIfOneSideLeft ends the game when only one side is still standing, and
+// reports whether it did. This is the shared answer to "did that knockout
+// finish it?" — before teams there were four copies of `len(active) <= 1`
+// scattered about, and a team game has to end while two players are still on
+// the board, so they could not simply stay.
+func (s *State) settleIfOneSideLeft() bool {
+	active := s.Active()
+	if len(active) == 0 {
+		s.finishDraw(ReasonLastAlive)
+		return true
+	}
+	if s.sidesLeft() <= 1 {
+		s.finish(active[0], ReasonLastAlive)
+		return true
+	}
+	return false
 }
 
 // ArmClock gives whoever we are now waiting on a fresh allowance. Called after
@@ -179,6 +271,50 @@ func SeatOrder(players int) []Color {
 	}
 }
 
+// PairedTeams is the only sensible partnership at a four-seat table: the two
+// players sitting opposite each other are partners.
+//
+// SeatOrder(4) runs West, SouthWest, East, NorthEast clockwise, so pairing
+// opposites also makes the turn order alternate between the sides — you never
+// get two of one team in a row, which is what makes a partnership game feel
+// like one. Any other seat count plays for itself; three cannot be split
+// evenly and two would just be a duel with extra words.
+func PairedTeams(seats []Color) map[Color]int {
+	if len(seats) != 4 {
+		return nil
+	}
+	return map[Color]int{seats[0]: 1, seats[2]: 1, seats[1]: 2, seats[3]: 2}
+}
+
+// SetTeams draws up sides. A nil or empty map is a free-for-all, and the two
+// options only mean anything alongside one.
+func (s *State) SetTeams(teams map[Color]int, friendlyFire, inherit bool) {
+	if len(teams) == 0 {
+		s.Teams, s.FriendlyFire, s.Inherit = nil, false, false
+		return
+	}
+	s.Teams = make(map[Color]int, len(teams))
+	for seat, team := range teams {
+		s.Teams[seat] = team
+	}
+	s.FriendlyFire, s.Inherit = friendlyFire, inherit
+}
+
+// WinningSide lists every seat that shares in the win — the winner alone in a
+// free-for-all, the whole partnership in a team game. Empty on a draw.
+func (s *State) WinningSide() []Color {
+	if s.Winner == "" {
+		return nil
+	}
+	out := []Color{s.Winner}
+	for _, seat := range s.Seats {
+		if s.Allied(seat, s.Winner) {
+			out = append(out, seat)
+		}
+	}
+	return out
+}
+
 // rotate60 turns a board key one sixth of a turn about the centre.
 func rotate60(kx, ky int) (int, int) {
 	return (kx - 3*ky) / 2, (kx + ky) / 2
@@ -223,6 +359,12 @@ func NewState(seats []Color, first Color) *State {
 func (s *State) Clone() *State {
 	cp := *s
 	cp.Seats = append([]Color(nil), s.Seats...)
+	if s.Teams != nil {
+		cp.Teams = make(map[Color]int, len(s.Teams))
+		for k, v := range s.Teams {
+			cp.Teams[k] = v
+		}
+	}
 	cp.Out = append([]Knockout(nil), s.Out...)
 	cp.Pending = append([]Color(nil), s.Pending...)
 	cp.Dice = make([][]DiceThrow, len(s.Dice))
@@ -436,12 +578,7 @@ func (s *State) Resign(b *Board, c Color) error {
 // the turn on when the seat that just left was the one to move. Reports
 // whether the game finished.
 func (s *State) settleAfterKnockout(b *Board, leaver Color) bool {
-	if active := s.Active(); len(active) <= 1 {
-		if len(active) == 1 {
-			s.finish(active[0], ReasonLastAlive)
-		} else {
-			s.finishDraw(ReasonLastAlive)
-		}
+	if s.settleIfOneSideLeft() {
 		return true
 	}
 	if s.Turn == leaver {

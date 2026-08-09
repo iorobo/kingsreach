@@ -507,6 +507,7 @@ func (s *Server) stepOneGame(ctx context.Context, id string, rng *mrand.Rand) {
 			if _, err := rec.State.RollDie(seat, rollDie); err != nil {
 				continue
 			}
+			resolveColours(rec)
 			s.armClock(rec)
 			rec.Version++
 			if err := s.st.Update(ctx, rec); err != nil {
@@ -608,6 +609,7 @@ func (s *Server) handleLobbyStart(w http.ResponseWriter, r *http.Request) {
 	}
 	fillBotSeats(rec)
 	startGame(rec)
+	resolveColours(rec)
 	s.armClock(rec)
 	rec.Version++
 	if err := s.st.Update(r.Context(), rec); err != nil {
