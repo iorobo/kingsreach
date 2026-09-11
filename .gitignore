@@ -26,3 +26,8 @@ unity/*.sln
 # OS noise
 Thumbs.db
 .DS_Store
+
+# Claude Code keeps a per-machine permission allowlist here. It is full of
+# absolute paths from whoever last worked on this checkout, and it is of no
+# use to anyone else — it was scrubbed from the history once, so keep it out.
+.claude/
